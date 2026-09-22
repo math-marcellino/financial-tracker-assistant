@@ -8,8 +8,7 @@ import { readSession } from "@/lib/session";
  * production so it cannot become an auth bypass.
  */
 export type IdentityResult =
-  | { ok: true; userId: number }
-  | { ok: false; error: string };
+  { ok: true; userId: number } | { ok: false; error: string };
 
 export const resolveUserId = async (): Promise<IdentityResult> => {
   const sessionUserId = await readSession();
@@ -25,7 +24,10 @@ export const resolveUserId = async (): Promise<IdentityResult> => {
   const raw = process.env.DEV_TELEGRAM_USER_ID;
 
   if (!raw) {
-    return { ok: false, error: "Not signed in, and DEV_TELEGRAM_USER_ID is not set." };
+    return {
+      ok: false,
+      error: "Not signed in, and DEV_TELEGRAM_USER_ID is not set.",
+    };
   }
 
   const userId = Number(raw);

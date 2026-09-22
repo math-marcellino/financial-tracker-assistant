@@ -5,7 +5,7 @@ import type {
   SummarizeTransactionsArgs,
 } from "@/lib/agent/tools";
 import { getDb } from "@/lib/db";
-import { transactions } from "@/lib/db/schema";
+import { budgets, transactions } from "@/lib/db/schema";
 
 const DEFAULT_LIST_LIMIT = 20;
 
@@ -97,5 +97,71 @@ export const summarizeTransactionsFor = async (
     total: row.total ?? "0",
     count: row.count,
     currency: row.currency,
+  }));
+};
+
+/** The dashboard's feed. Newest first, scoped to the user in SQL. */
+export const listRecentForUser = async (userId: number, limit = 200) =>
+  getDb()
+    .select({
+      id: transactions.id,
+      amount: transactions.amount,
+      currency: transactions.currency,
+      type: transactions.type,
+      categoryExpense: transactions.categoryExpense,
+      categoryIncome: transactions.categoryIncome,
+      date: transactions.date,
+      note: transactions.note,
+      createdAt: transactions.createdAt,
+    })
+    .from(transactions)
+    .where(eq(transactions.userId, userId))
+    .orderBy(desc(transactions.date), desc(transactions.createdAt))
+    .limit(limit);
+
+export type DashboardTransaction = Awaited<
+  ReturnType<typeof listRecentForUser>
+>[number];
+
+export type BudgetProgress = {
+  id: string;
+  category: string;
+  limitAmount: string;
+  spent: string;
+  currency: string;
+  month: string;
+};
+
+/**
+ * Budgets with the spend they're measured against, summed by Postgres over the budget's
+ * own month. Doing the arithmetic in SQL keeps it correct regardless of how many rows
+ * there are, and keeps the client from having to re-derive it.
+ */
+export const listBudgetsWithSpend = async (
+  userId: number,
+): Promise<BudgetProgress[]> => {
+  const rows = await getDb()
+    .select({
+      id: budgets.id,
+      category: budgets.category,
+      limitAmount: budgets.limitAmount,
+      currency: budgets.currency,
+      month: budgets.month,
+      spent: sql<string>`coalesce((
+        select sum(t.amount)
+        from ${transactions} t
+        where t.user_id = ${budgets.userId}
+          and t.type = 'expense'
+          and t.category_expense = ${budgets.category}
+          and date_trunc('month', t.date) = date_trunc('month', ${budgets.month})
+      ), 0)::text`,
+    })
+    .from(budgets)
+    .where(eq(budgets.userId, userId))
+    .orderBy(desc(budgets.month), budgets.category);
+
+  return rows.map((row) => ({
+    ...row,
+    month: String(row.month).slice(0, 10),
   }));
 };

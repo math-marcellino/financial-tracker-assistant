@@ -370,7 +370,10 @@ export async function* streamAgentMessage({
       }
     } catch (error) {
       // Surfaced, not swallowed: the caller gets the real upstream message.
-      yield { type: "error", error: `LLM call failed: ${describeError(error)}` };
+      yield {
+        type: "error",
+        error: `LLM call failed: ${describeError(error)}`,
+      };
       return;
     }
 
@@ -437,7 +440,10 @@ export async function* streamAgentMessage({
 
       if (!parsed.success) {
         const detail = parsed.issues
-          .map((issue) => `${v.getDotPath(issue) ?? "arguments"}: ${issue.message}`)
+          .map(
+            (issue) =>
+              `${v.getDotPath(issue) ?? "arguments"}: ${issue.message}`,
+          )
           .join("; ");
 
         yield { type: "error", error: `Invalid ${name} arguments — ${detail}` };

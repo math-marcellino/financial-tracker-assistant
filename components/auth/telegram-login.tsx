@@ -65,9 +65,7 @@ export const TelegramLogin = ({ botUsername }: { botUsername: string }) => {
   return (
     <div className="flex flex-col items-center gap-3">
       <div ref={containerRef} />
-      {error ? (
-        <p className="text-sm text-[var(--co-error)]">{error}</p>
-      ) : null}
+      {error ? <p className="text-sm text-[var(--co-error)]">{error}</p> : null}
     </div>
   );
 };

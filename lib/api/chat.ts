@@ -1,7 +1,4 @@
-import type {
-  AgentEvent,
-  AgentResult,
-} from "@/lib/agent/handleAgentMessage";
+import type { AgentEvent, AgentResult } from "@/lib/agent/handleAgentMessage";
 
 /**
  * Reads the SSE stream from /api/chat and hands each event to `onEvent` as it lands.

@@ -12,8 +12,10 @@ import { verifyWebhookSecret } from "@/lib/telegram/verify";
 
 export const dynamic = "force-dynamic";
 
-let cached: { bot: Bot; handle: (request: Request) => Promise<Response> } | null =
-  null;
+let cached: {
+  bot: Bot;
+  handle: (request: Request) => Promise<Response>;
+} | null = null;
 
 const getHandler = () => {
   if (cached) {

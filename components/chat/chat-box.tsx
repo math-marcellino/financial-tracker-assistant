@@ -9,7 +9,11 @@ import {
   ChatContainerContent,
   ChatContainerRoot,
 } from "@/components/ui/chat-container";
-import { Message, MessageActions, MessageContent } from "@/components/ui/message";
+import {
+  Message,
+  MessageActions,
+  MessageContent,
+} from "@/components/ui/message";
 import {
   PromptInput,
   PromptInputActions,
@@ -22,7 +26,12 @@ import { ThinkingBar } from "@/components/ui/thinking-bar";
 import { useMessages } from "@/hooks/use-messages";
 import { useSendMessage } from "@/hooks/use-send-message";
 import { messagesQueryKey } from "@/lib/api/messages";
-import type { Message as ChatMessage, TransactionSnapshot } from "@/lib/db/schema";
+import { budgetsQueryKey, transactionsQueryKey } from "@/lib/api/transactions";
+import { formatAmount } from "@/lib/format";
+import type {
+  Message as ChatMessage,
+  TransactionSnapshot,
+} from "@/lib/db/schema";
 import { createPushStream, type PushStream } from "@/lib/push-stream";
 
 /** Shown only on an empty thread: one per tool group, so the read tools are discoverable. */
@@ -40,31 +49,6 @@ const TOOL_LABELS: Record<string, string> = {
   set_budget: "Saving the budget",
   list_transactions: "Looking through your records",
   summarize_transactions: "Adding up the totals",
-};
-
-/**
- * Display only. The stored value stays the exact string Postgres returned; this never
- * feeds back into a write.
- *
- * Whole amounts drop their minor units. Intl still renders IDR with two decimals, and
- * "Rp 250,000.00" is noise for a currency nobody quotes in cents.
- */
-const formatAmount = (amount: string, currency: string): string => {
-  const value = Number(amount);
-
-  if (!Number.isFinite(value)) {
-    return `${amount} ${currency}`;
-  }
-
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency,
-    currencyDisplay: "narrowSymbol",
-    ...(Number.isInteger(value) && {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }),
-  }).format(value);
 };
 
 /**
@@ -96,7 +80,12 @@ const TransactionCard = ({ snapshot }: { snapshot: TransactionSnapshot }) => {
         {snapshot.category?.replace(/_/g, " ")}
       </span>,
     ],
-    ["Date", <span key="date" className="tabular-nums">{snapshot.date}</span>],
+    [
+      "Date",
+      <span key="date" className="tabular-nums">
+        {snapshot.date}
+      </span>,
+    ],
     ...(snapshot.note
       ? ([["Note", snapshot.note]] as Array<[string, React.ReactNode]>)
       : []),
@@ -211,9 +200,14 @@ export const ChatBox = ({ userId }: { userId: number }) => {
         }
 
         // The turn is persisted server-side, so refetch rather than guessing at it.
-        void queryClient.invalidateQueries({
-          queryKey: messagesQueryKey(userId),
-        });
+        // A tool call may have written a transaction or a budget, so those go too.
+        for (const queryKey of [
+          messagesQueryKey(userId),
+          transactionsQueryKey(userId),
+          budgetsQueryKey(userId),
+        ]) {
+          void queryClient.invalidateQueries({ queryKey });
+        }
       },
       // A failed request is shown, not swallowed into a cheerful placeholder reply.
       onError: (error) => {

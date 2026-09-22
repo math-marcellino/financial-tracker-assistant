@@ -4,11 +4,13 @@ import {
   dehydrate,
 } from "@tanstack/react-query";
 
-import { ChatBox } from "@/components/chat/chat-box";
-import { listMessagesAscending } from "@/lib/db/messages";
-import { ensureUser } from "@/lib/db/users";
-import { messagesQueryKey } from "@/lib/api/messages";
 import { TelegramLogin } from "@/components/auth/telegram-login";
+import { Workspace } from "@/components/dashboard/workspace";
+import { messagesQueryKey } from "@/lib/api/messages";
+import { budgetsQueryKey, transactionsQueryKey } from "@/lib/api/transactions";
+import { listMessagesAscending } from "@/lib/db/messages";
+import { listBudgetsWithSpend, listRecentForUser } from "@/lib/db/transactions";
+import { ensureUser } from "@/lib/db/users";
 import { resolveUserId } from "@/lib/identity";
 
 // Server Component. The "use client" boundary sits on ChatBox, not on this page.
@@ -28,7 +30,8 @@ export default async function DashboardPage() {
               Money, in plain language
             </h1>
             <p className="text-base leading-[1.5] text-white/70">
-              Sign in with Telegram to use the same account from the web and the bot.
+              Sign in with Telegram to use the same account from the web and the
+              bot.
             </p>
           </div>
 
@@ -36,8 +39,8 @@ export default async function DashboardPage() {
             <TelegramLogin botUsername={botUsername} />
           ) : (
             <p className="text-sm text-white/70">
-              NEXT_PUBLIC_TELEGRAM_BOT_USERNAME is not set, so the login widget cannot
-              render.
+              NEXT_PUBLIC_TELEGRAM_BOT_USERNAME is not set, so the login widget
+              cannot render.
             </p>
           )}
         </div>
@@ -51,29 +54,36 @@ export default async function DashboardPage() {
   // with no extra round-trip, and stays reactive afterwards.
   const queryClient = new QueryClient();
 
-  await queryClient.prefetchQuery({
-    queryKey: messagesQueryKey(identity.userId),
-    queryFn: () => listMessagesAscending(identity.userId),
-  });
+  await Promise.all([
+    queryClient.prefetchQuery({
+      queryKey: messagesQueryKey(identity.userId),
+      queryFn: () => listMessagesAscending(identity.userId),
+    }),
+    queryClient.prefetchQuery({
+      queryKey: transactionsQueryKey(identity.userId),
+      queryFn: () => listRecentForUser(identity.userId),
+    }),
+    queryClient.prefetchQuery({
+      queryKey: budgetsQueryKey(identity.userId),
+      queryFn: () => listBudgetsWithSpend(identity.userId),
+    }),
+  ]);
 
   return (
-    /* The scroller must be the full width of the window, so its scrollbar sits at
-       the very right edge rather than at the edge of the reading column. The column
-       width is applied to the content inside it instead. */
     <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <header className="mx-auto flex w-full max-w-2xl shrink-0 flex-col gap-2 px-6 pt-10 pb-6">
-        {/* section-heading: 48px / 400 / -0.48px. Never bold — size and spacing do the
-            hierarchy work (DESIGN.md § Typography Principles). */}
-        <h1 className="text-[2.5rem] leading-[1.1] font-normal tracking-[-0.48px] text-[var(--co-ink)]">
+      <header className="mx-auto flex w-full max-w-6xl shrink-0 flex-col gap-2 px-6 pt-8 pb-5">
+        {/* section-heading: never bold — size and spacing do the hierarchy work
+            (DESIGN.md § Typography Principles). */}
+        <h1 className="text-[2.25rem] leading-[1.1] font-normal tracking-[-0.48px] text-[var(--co-ink)]">
           Money, in plain language
         </h1>
-        <p className="text-[1.125rem] leading-[1.4] text-[var(--co-body-muted)]">
+        <p className="text-[1.0625rem] leading-[1.4] text-[var(--co-body-muted)]">
           Tell it what you spent. Ask it what you&rsquo;ve spent.
         </p>
       </header>
 
       <HydrationBoundary state={dehydrate(queryClient)}>
-        <ChatBox userId={identity.userId} />
+        <Workspace userId={identity.userId} />
       </HydrationBoundary>
     </div>
   );
