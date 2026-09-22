@@ -60,6 +60,9 @@ const buildSystemInstruction = (defaultCurrency: string, now: Date): string =>
     `Income categories: ${INCOME_CATEGORIES.join(", ")}.`,
     "The category you pass must belong to the type you pass.",
     "If the user asks for something no tool covers, answer in plain text. Never force an unrelated tool call.",
+    // The chatbox renders replies as plain text, so markdown syntax would show literally.
+    "Reply in plain prose. Do not use markdown: no asterisks for emphasis, no bullet lists, no headings.",
+    "Keep replies to one short sentence. The transaction details are displayed separately, so do not restate every field.",
   ].join("\n");
 
 /** Executes a validated call. Everything here has already passed its Valibot schema. */

@@ -11,6 +11,28 @@ type Entry =
   | { role: "agent"; text: string; transaction: Transaction | null }
   | { role: "error"; text: string };
 
+/**
+ * Display only. The stored value stays the exact string Postgres returned; this never
+ * feeds back into a write.
+ *
+ * Whole amounts drop their minor units. Intl still renders IDR with two decimals, and
+ * "Rp 250,000.00" is noise for a currency nobody quotes in cents.
+ */
+const formatAmount = (amount: string, currency: string): string => {
+  const value = Number(amount);
+
+  if (!Number.isFinite(value)) {
+    return `${amount} ${currency}`;
+  }
+
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency,
+    currencyDisplay: "narrowSymbol",
+    ...(Number.isInteger(value) && { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+  }).format(value);
+};
+
 const TransactionCard = ({ transaction }: { transaction: Transaction }) => {
   const category = transaction.categoryExpense ?? transaction.categoryIncome;
   const sign = transaction.type === "expense" ? "−" : "+";
@@ -20,7 +42,7 @@ const TransactionCard = ({ transaction }: { transaction: Transaction }) => {
       <dt className="text-muted-foreground">Amount</dt>
       <dd className="font-medium tabular-nums">
         {sign}
-        {transaction.amount} {transaction.currency}
+        {formatAmount(transaction.amount, transaction.currency)}
       </dd>
 
       <dt className="text-muted-foreground">Category</dt>
