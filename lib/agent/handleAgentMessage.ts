@@ -15,16 +15,24 @@ import {
   type AddTransactionArgs,
   type DeleteTransactionArgs,
   type EditTransactionArgs,
+  type ListTransactionsArgs,
   type SetBudgetArgs,
+  type SummarizeTransactionsArgs,
   type ToolName,
 } from "@/lib/agent/tools";
 import { getDb } from "@/lib/db";
+import { appendMessage, listMessages } from "@/lib/db/messages";
 import {
   budgets,
   transactions,
   users,
+  type Message,
   type Transaction,
 } from "@/lib/db/schema";
+import {
+  listTransactionsFor,
+  summarizeTransactionsFor,
+} from "@/lib/db/transactions";
 
 /**
  * The single canonical implementation of the agent loop. A plain function on purpose: no
@@ -40,9 +48,18 @@ export type AgentResult =
 export type HandleAgentMessageInput = {
   userId: number;
   message: string;
+  /** Which surface the message came from. Both share one thread per user. */
+  source?: "web" | "telegram";
   /** Injectable so the caller controls "today"; defaults to the server's clock. */
   now?: Date;
 };
+
+/**
+ * A read tool can be followed by a write tool, so the loop has to run more than once.
+ * The cap stops a confused model burning the API quota; hitting it is reported, never
+ * papered over with a partial answer.
+ */
+const MAX_STEPS = 5;
 
 const toIsoDate = (date: Date): string => date.toISOString().slice(0, 10);
 
@@ -60,6 +77,8 @@ const buildSystemInstruction = (defaultCurrency: string, now: Date): string =>
     `Income categories: ${INCOME_CATEGORIES.join(", ")}.`,
     "The category you pass must belong to the type you pass.",
     "If the user asks for something no tool covers, answer in plain text. Never force an unrelated tool call.",
+    "To answer questions about past spending, call list_transactions or summarize_transactions. Never guess at figures or rely on the conversation for them.",
+    "When the user refers to a transaction in words ('my last grocery entry'), call list_transactions first to get its id, then edit or delete it.",
     // The chatbox renders replies as plain text, so markdown syntax would show literally.
     "Reply in plain prose. Do not use markdown: no asterisks for emphasis, no bullet lists, no headings.",
     "Keep replies to one short sentence. The transaction details are displayed separately, so do not restate every field.",
@@ -185,6 +204,38 @@ const executeToolCall = async (
     };
   }
 
+  if (name === "list_transactions") {
+    const rows = await listTransactionsFor(
+      userId,
+      args as ListTransactionsArgs,
+    );
+
+    return {
+      transaction: null,
+      result: {
+        count: rows.length,
+        transactions: rows.map((row) => ({
+          id: row.id,
+          amount: row.amount,
+          currency: row.currency,
+          type: row.type,
+          category: row.categoryExpense ?? row.categoryIncome,
+          date: row.date,
+          note: row.note,
+        })),
+      },
+    };
+  }
+
+  if (name === "summarize_transactions") {
+    const rows = await summarizeTransactionsFor(
+      userId,
+      args as SummarizeTransactionsArgs,
+    );
+
+    return { transaction: null, result: { groups: rows } };
+  }
+
   const input = args as SetBudgetArgs;
   const month = input.month ?? toIsoDate(now).slice(0, 7);
   const currency = input.currency ?? defaultCurrency;
@@ -211,9 +262,16 @@ const executeToolCall = async (
   return { transaction: null, result: { status: "saved", id: row.id, month } };
 };
 
+/** Stored turns replay as plain text; tool traffic is never persisted or replayed. */
+const toChatMessage = (row: Message): ChatCompletionMessageParam =>
+  row.role === "user"
+    ? { role: "user", content: row.content }
+    : { role: "assistant", content: row.content };
+
 export const handleAgentMessage = async ({
   userId,
   message,
+  source = "web",
   now = new Date(),
 }: HandleAgentMessageInput): Promise<AgentResult> => {
   const [user] = await getDb()
@@ -225,106 +283,121 @@ export const handleAgentMessage = async ({
     return { ok: false, error: `No user ${userId}.` };
   }
 
-  const messages: ChatCompletionMessageParam[] = [
+  const history = await listMessages(userId);
+
+  const working: ChatCompletionMessageParam[] = [
     {
       role: "system",
       content: buildSystemInstruction(user.defaultCurrency, now),
     },
+    ...history.map(toChatMessage),
     { role: "user", content: message },
   ];
 
-  let first: ChatCompletion;
+  // The transaction the UI shows: whichever one the last write touched.
+  let affected: Transaction | null = null;
 
-  try {
-    first = await getGroq().chat.completions.create({
-      model: LLM_MODEL,
-      messages,
-      tools: TOOL_DECLARATIONS,
-    });
-  } catch (error) {
-    // Surfaced, not swallowed: the caller gets the real upstream message instead of an
-    // opaque 500, and no tool runs.
-    return { ok: false, error: `LLM call failed: ${describeError(error)}` };
+  for (let step = 0; step < MAX_STEPS; step += 1) {
+    let completion: ChatCompletion;
+
+    try {
+      completion = await getGroq().chat.completions.create({
+        model: LLM_MODEL,
+        messages: working,
+        tools: TOOL_DECLARATIONS,
+      });
+    } catch (error) {
+      // Surfaced, not swallowed: the caller gets the real upstream message.
+      return { ok: false, error: `LLM call failed: ${describeError(error)}` };
+    }
+
+    const assistant = completion.choices[0]?.message;
+    const calls = assistant?.tool_calls ?? [];
+
+    // No tool fits, so the model answers in plain text. This is the correct out-of-scope
+    // behaviour: there is deliberately no catch-all tool to fall back on.
+    if (calls.length === 0) {
+      const reply = assistant?.content ?? "";
+
+      // Both halves are written only once the turn completes. Persisting the user's
+      // message up front left a dangling turn behind every failure, which then replayed
+      // as context into later calls — and duplicated on every retry.
+      await appendMessage({ userId, role: "user", source, content: message });
+      await appendMessage({
+        userId,
+        role: "assistant",
+        source,
+        content: reply,
+        transactionId: affected?.id ?? null,
+      });
+
+      return { ok: true, reply, transaction: affected };
+    }
+
+    working.push(assistant);
+
+    // Every tool_call needs a matching tool message. Answering only the first one is a
+    // 400 on the next turn, so the whole batch is executed.
+    for (const call of calls) {
+      const name = call.function?.name;
+
+      if (!name || !isToolName(name)) {
+        return {
+          ok: false,
+          error: `Model proposed an unknown tool: ${name ?? "(unnamed)"}.`,
+        };
+      }
+
+      // Arguments arrive as a JSON *string*, so malformed JSON is its own failure mode.
+      let rawArgs: unknown;
+
+      try {
+        rawArgs = JSON.parse(call.function?.arguments || "{}");
+      } catch (error) {
+        return {
+          ok: false,
+          error: `Model sent unparseable ${name} arguments: ${describeError(error)}`,
+        };
+      }
+
+      // A model's output is untrusted input, same as a form submission. Nothing below
+      // this line runs unless the arguments parse.
+      const parsed = v.safeParse(TOOL_SCHEMAS[name], rawArgs);
+
+      if (!parsed.success) {
+        const detail = parsed.issues
+          .map(
+            (issue) =>
+              `${v.getDotPath(issue) ?? "arguments"}: ${issue.message}`,
+          )
+          .join("; ");
+
+        return { ok: false, error: `Invalid ${name} arguments — ${detail}` };
+      }
+
+      const { transaction, result } = await executeToolCall(
+        name,
+        parsed.output,
+        userId,
+        user.defaultCurrency,
+        now,
+      );
+
+      if (transaction) {
+        affected = transaction;
+      }
+
+      working.push({
+        role: "tool",
+        tool_call_id: call.id,
+        content: JSON.stringify(result),
+      });
+    }
   }
 
-  const assistant = first.choices[0]?.message;
-  const calls = assistant?.tool_calls ?? [];
-
-  // No tool fits what was asked, so the model answers in plain text. This is the correct
-  // out-of-scope behaviour: there is deliberately no catch-all tool to fall back on.
-  if (calls.length === 0) {
-    return { ok: true, reply: assistant?.content ?? "", transaction: null };
-  }
-
-  const [call] = calls;
-  const name = call.function?.name;
-
-  if (!name || !isToolName(name)) {
-    return {
-      ok: false,
-      error: `Model proposed an unknown tool: ${name ?? "(unnamed)"}.`,
-    };
-  }
-
-  // Arguments arrive as a JSON *string*, so malformed JSON is its own failure mode and
-  // must not throw past the caller.
-  let rawArgs: unknown;
-
-  try {
-    rawArgs = JSON.parse(call.function?.arguments || "{}");
-  } catch (error) {
-    return {
-      ok: false,
-      error: `Model sent unparseable ${name} arguments: ${describeError(error)}`,
-    };
-  }
-
-  // A model's output is untrusted input, same as a form submission. Nothing below this
-  // line runs unless the arguments parse.
-  const parsed = v.safeParse(TOOL_SCHEMAS[name], rawArgs);
-
-  if (!parsed.success) {
-    const detail = parsed.issues
-      .map((issue) => `${v.getDotPath(issue) ?? "arguments"}: ${issue.message}`)
-      .join("; ");
-
-    return { ok: false, error: `Invalid ${name} arguments — ${detail}` };
-  }
-
-  const { transaction, result } = await executeToolCall(
-    name,
-    parsed.output,
-    userId,
-    user.defaultCurrency,
-    now,
-  );
-
-  messages.push(assistant);
-  messages.push({
-    role: "tool",
-    tool_call_id: call.id,
-    content: JSON.stringify(result),
-  });
-
-  // The write already landed, so a failure here must not read as "nothing happened". The
-  // transaction is still returned; only the closing sentence is missing.
-  try {
-    const second = await getGroq().chat.completions.create({
-      model: LLM_MODEL,
-      messages,
-      tools: TOOL_DECLARATIONS,
-    });
-
-    return {
-      ok: true,
-      reply: second.choices[0]?.message?.content ?? "",
-      transaction,
-    };
-  } catch (error) {
-    return {
-      ok: true,
-      reply: `Saved, but the model did not return a confirmation: ${describeError(error)}`,
-      transaction,
-    };
-  }
+  // Reported rather than papered over with whatever partial text is to hand.
+  return {
+    ok: false,
+    error: `The agent did not finish within ${MAX_STEPS} steps.`,
+  };
 };

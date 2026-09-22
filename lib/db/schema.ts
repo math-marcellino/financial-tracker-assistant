@@ -14,24 +14,30 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-export const transactionType = pgEnum("transaction_type", ["income", "expense"]);
-
-export const transactionCategoryExpense = pgEnum("transaction_category_expense", [
-  "food_drink",
-  "groceries",
-  "transport",
-  "housing",
-  "utilities",
-  "health",
-  "shopping",
-  "entertainment",
-  "education",
-  "travel",
-  "subscriptions",
-  "fees_charges",
-  "gifts_donations",
-  "other",
+export const transactionType = pgEnum("transaction_type", [
+  "income",
+  "expense",
 ]);
+
+export const transactionCategoryExpense = pgEnum(
+  "transaction_category_expense",
+  [
+    "food_drink",
+    "groceries",
+    "transport",
+    "housing",
+    "utilities",
+    "health",
+    "shopping",
+    "entertainment",
+    "education",
+    "travel",
+    "subscriptions",
+    "fees_charges",
+    "gifts_donations",
+    "other",
+  ],
+);
 
 export const transactionCategoryIncome = pgEnum("transaction_category_income", [
   "salary",
@@ -49,8 +55,12 @@ export const users = pgTable("users", {
   // Optional and user-changeable on Telegram's side: display only, never an identifier.
   username: text("username"),
   firstName: text("first_name"),
-  defaultCurrency: char("default_currency", { length: 3 }).notNull().default("IDR"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  defaultCurrency: char("default_currency", { length: 3 })
+    .notNull()
+    .default("IDR"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
 });
 
 export const transactions = pgTable(
@@ -70,7 +80,9 @@ export const transactions = pgTable(
     // The calendar day of the transaction, distinct from created_at below.
     date: date("date").notNull(),
     note: text("note"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
   (table) => [
     index("transactions_user_id_date_idx").on(table.userId, table.date),
@@ -98,8 +110,12 @@ export const budgets = pgTable(
     currency: char("currency", { length: 3 }).notNull(),
     // Always the 1st of the month the budget applies to.
     month: date("month").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
   },
   (table) => [
     // What makes set_budget an upsert rather than a duplicate-row generator.
@@ -111,9 +127,45 @@ export const budgets = pgTable(
   ],
 );
 
+export const messageRole = pgEnum("message_role", ["user", "assistant"]);
+export const messageSource = pgEnum("message_source", ["web", "telegram"]);
+
+/**
+ * Only user and assistant *text* turns are stored — never tool_calls or tool results.
+ * An OpenAI-compatible API rejects a replay window that separates a tool_call from its
+ * matching tool message; storing text only makes that impossible by construction.
+ * Nothing is lost, because facts come from the read tools, not from replayed tool output.
+ */
+export const messages = pgTable(
+  "messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: bigint("user_id", { mode: "number" })
+      .notNull()
+      .references(() => users.telegramId, { onDelete: "cascade" }),
+    role: messageRole("role").notNull(),
+    // One thread per user across both surfaces, which already share telegram_id.
+    source: messageSource("source").notNull(),
+    content: text("content").notNull(),
+    // Lets stored history render its transaction card again. `set null` so deleting a
+    // transaction doesn't take the message that announced it.
+    transactionId: uuid("transaction_id").references(() => transactions.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("messages_user_id_created_at_idx").on(table.userId, table.createdAt),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Transaction = typeof transactions.$inferSelect;
 export type NewTransaction = typeof transactions.$inferInsert;
 export type Budget = typeof budgets.$inferSelect;
 export type NewBudget = typeof budgets.$inferInsert;
+export type Message = typeof messages.$inferSelect;
+export type NewMessage = typeof messages.$inferInsert;

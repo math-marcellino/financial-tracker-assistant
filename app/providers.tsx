@@ -8,5 +8,7 @@ export const Providers = ({ children }: { children: ReactNode }) => {
   // on the server.
   const [queryClient] = useState(() => new QueryClient());
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
 };

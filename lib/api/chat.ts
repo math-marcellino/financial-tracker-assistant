@@ -1,6 +1,8 @@
 import type { AgentResult } from "@/lib/agent/handleAgentMessage";
 
-export const sendChatMessage = async (message: string): Promise<AgentResult> => {
+export const sendChatMessage = async (
+  message: string,
+): Promise<AgentResult> => {
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

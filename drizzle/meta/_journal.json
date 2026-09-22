@@ -15,6 +15,13 @@
       "when": 1790089534538,
       "tag": "0001_conscious_roxanne_simpson",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790096059636,
+      "tag": "0002_sloppy_zemo",
+      "breakpoints": true
     }
   ]
 }

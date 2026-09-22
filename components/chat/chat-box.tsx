@@ -1,15 +1,14 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useMessages } from "@/hooks/use-messages";
 import { useSendMessage } from "@/hooks/use-send-message";
+import { messagesQueryKey } from "@/lib/api/messages";
+import type { MessageWithTransaction } from "@/lib/db/messages";
 import type { Transaction } from "@/lib/db/schema";
-
-type Entry =
-  | { role: "user"; text: string }
-  | { role: "agent"; text: string; transaction: Transaction | null }
-  | { role: "error"; text: string };
 
 /**
  * Display only. The stored value stays the exact string Postgres returned; this never
@@ -29,7 +28,10 @@ const formatAmount = (amount: string, currency: string): string => {
     style: "currency",
     currency,
     currencyDisplay: "narrowSymbol",
-    ...(Number.isInteger(value) && { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+    ...(Number.isInteger(value) && {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }),
   }).format(value);
 };
 
@@ -61,9 +63,33 @@ const TransactionCard = ({ transaction }: { transaction: Transaction }) => {
   );
 };
 
-export const ChatBox = () => {
+const Bubble = ({
+  role,
+  children,
+}: {
+  role: "user" | "assistant" | "error";
+  children: React.ReactNode;
+}) => (
+  <div
+    className={
+      role === "user"
+        ? "self-end rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground"
+        : role === "error"
+          ? "self-start rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          : "w-full max-w-md self-start rounded-lg bg-muted px-3 py-2 text-sm"
+    }
+  >
+    {children}
+  </div>
+);
+
+export const ChatBox = ({ userId }: { userId: number }) => {
   const [draft, setDraft] = useState("");
-  const [entries, setEntries] = useState<Entry[]>([]);
+  // Errors are per-attempt and not worth storing; they live only in this view.
+  const [errors, setErrors] = useState<string[]>([]);
+  const queryClient = useQueryClient();
+  const { data: messages = [], isPending: isLoadingHistory } =
+    useMessages(userId);
   const { mutate, isPending } = useSendMessage();
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -75,21 +101,23 @@ export const ChatBox = () => {
       return;
     }
 
-    setEntries((current) => [...current, { role: "user", text: message }]);
     setDraft("");
+    setErrors([]);
 
     mutate(message, {
       onSuccess: (result) => {
-        setEntries((current) => [
-          ...current,
-          result.ok
-            ? { role: "agent", text: result.reply, transaction: result.transaction }
-            : { role: "error", text: result.error },
-        ]);
+        if (!result.ok) {
+          setErrors((current) => [...current, result.error]);
+        }
+
+        // The turn is persisted server-side, so refetch rather than guessing at it.
+        void queryClient.invalidateQueries({
+          queryKey: messagesQueryKey(userId),
+        });
       },
       // A failed request is shown, not swallowed into a cheerful placeholder reply.
       onError: (error) => {
-        setEntries((current) => [...current, { role: "error", text: error.message }]);
+        setErrors((current) => [...current, error.message]);
       },
     });
   };
@@ -97,31 +125,41 @@ export const ChatBox = () => {
   return (
     <section className="flex w-full flex-col gap-4">
       <div className="flex flex-col gap-3">
-        {entries.length === 0 ? (
+        {isLoadingHistory ? (
+          <p className="text-sm text-muted-foreground">Loading history…</p>
+        ) : null}
+
+        {!isLoadingHistory && messages.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Try <span className="font-medium text-foreground">spent 45k on lunch</span>.
+            Try{" "}
+            <span className="font-medium text-foreground">
+              spent 45k on lunch
+            </span>
+            , or ask{" "}
+            <span className="font-medium text-foreground">
+              how much did I spend on food this month?
+            </span>
           </p>
         ) : null}
 
-        {entries.map((entry, index) => (
-          <div
-            key={index}
-            className={
-              entry.role === "user"
-                ? "self-end rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground"
-                : entry.role === "error"
-                  ? "self-start rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-                  : "self-start w-full max-w-md rounded-lg bg-muted px-3 py-2 text-sm"
-            }
-          >
-            <p className="whitespace-pre-wrap">{entry.text}</p>
-            {entry.role === "agent" && entry.transaction ? (
-              <TransactionCard transaction={entry.transaction} />
+        {messages.map((message: MessageWithTransaction) => (
+          <Bubble key={message.id} role={message.role}>
+            <p className="whitespace-pre-wrap">{message.content}</p>
+            {message.role === "assistant" && message.transaction ? (
+              <TransactionCard transaction={message.transaction} />
             ) : null}
-          </div>
+          </Bubble>
         ))}
 
-        {isPending ? <p className="text-sm text-muted-foreground">Thinking…</p> : null}
+        {errors.map((error, index) => (
+          <Bubble key={`error-${index}`} role="error">
+            <p className="whitespace-pre-wrap">{error}</p>
+          </Bubble>
+        ))}
+
+        {isPending ? (
+          <p className="text-sm text-muted-foreground">Thinking…</p>
+        ) : null}
       </div>
 
       <form onSubmit={handleSubmit} className="flex gap-2">
@@ -136,7 +174,11 @@ export const ChatBox = () => {
           autoComplete="off"
           className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
         />
-        <Button type="submit" size="lg" disabled={isPending || draft.trim().length === 0}>
+        <Button
+          type="submit"
+          size="lg"
+          disabled={isPending || draft.trim().length === 0}
+        >
           Send
         </Button>
       </form>

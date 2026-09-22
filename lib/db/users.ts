@@ -19,7 +19,10 @@ export const ensureUser = async (telegramId: number): Promise<User> => {
     return inserted;
   }
 
-  const [existing] = await getDb().select().from(users).where(eq(users.telegramId, telegramId));
+  const [existing] = await getDb()
+    .select()
+    .from(users)
+    .where(eq(users.telegramId, telegramId));
 
   if (!existing) {
     throw new Error(`Failed to load user ${telegramId} after upsert.`);

@@ -129,11 +129,31 @@ export const SetBudgetSchema = v.object({
   currency: v.optional(CurrencySchema),
 });
 
+export const MAX_LIST_LIMIT = 50;
+
+export const ListTransactionsSchema = v.object({
+  from: v.optional(DateSchema),
+  to: v.optional(DateSchema),
+  type: v.optional(TypeSchema),
+  category: v.optional(CategorySchema),
+  limit: v.optional(
+    v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(MAX_LIST_LIMIT)),
+  ),
+});
+
+export const SummarizeTransactionsSchema = v.object({
+  from: DateSchema,
+  to: DateSchema,
+  groupBy: v.picklist(["category", "type", "month"], "Unknown grouping."),
+});
+
 export const TOOL_SCHEMAS = {
   add_transaction: AddTransactionSchema,
   edit_transaction: EditTransactionSchema,
   delete_transaction: DeleteTransactionSchema,
   set_budget: SetBudgetSchema,
+  list_transactions: ListTransactionsSchema,
+  summarize_transactions: SummarizeTransactionsSchema,
 } as const;
 
 export type ToolName = keyof typeof TOOL_SCHEMAS;
@@ -147,6 +167,10 @@ export type DeleteTransactionArgs = v.InferOutput<
   typeof DeleteTransactionSchema
 >;
 export type SetBudgetArgs = v.InferOutput<typeof SetBudgetSchema>;
+export type ListTransactionsArgs = v.InferOutput<typeof ListTransactionsSchema>;
+export type SummarizeTransactionsArgs = v.InferOutput<
+  typeof SummarizeTransactionsSchema
+>;
 
 const amountProperty = {
   type: "number",
@@ -195,7 +219,7 @@ export const TOOL_DECLARATIONS: ChatCompletionTool[] = [
     function: {
       name: "edit_transaction",
       description:
-        "Change fields on an existing transaction. Only call this with an id the user has been shown.",
+        "Change fields on an existing transaction. Call list_transactions first to find the id when the user refers to a transaction in words.",
       parameters: {
         type: "object",
         properties: {
@@ -249,6 +273,60 @@ export const TOOL_DECLARATIONS: ChatCompletionTool[] = [
           currency: currencyProperty,
         },
         required: ["category", "limit"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_transactions",
+      description:
+        "Look up the user's transactions. Use this to answer questions about what they spent, and to find the id of a transaction they refer to in words before editing or deleting it.",
+      parameters: {
+        type: "object",
+        properties: {
+          from: {
+            type: "string",
+            description: "Inclusive start date, YYYY-MM-DD.",
+          },
+          to: {
+            type: "string",
+            description: "Inclusive end date, YYYY-MM-DD.",
+          },
+          type: { type: "string", enum: [...TRANSACTION_TYPES] },
+          category: {
+            type: "string",
+            enum: [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES],
+          },
+          limit: {
+            type: "number",
+            description: `Newest first. Default 20, maximum ${MAX_LIST_LIMIT}.`,
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "summarize_transactions",
+      description:
+        "Totals over a date range, computed by the database. Prefer this over adding up rows from list_transactions yourself.",
+      parameters: {
+        type: "object",
+        properties: {
+          from: {
+            type: "string",
+            description: "Inclusive start date, YYYY-MM-DD.",
+          },
+          to: {
+            type: "string",
+            description: "Inclusive end date, YYYY-MM-DD.",
+          },
+          groupBy: { type: "string", enum: ["category", "type", "month"] },
+        },
+        required: ["from", "to", "groupBy"],
       },
     },
   },
