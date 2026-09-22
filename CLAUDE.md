@@ -15,10 +15,8 @@ HOW TO MAINTAIN THIS FILE
 - Add to this file when: Claude makes the same mistake twice, or you type the same
   correction you typed last session.
 - Run `/context` to confirm this file loaded. Run `/doctor` occasionally for trims.
-SETUP REQUIRED before the "Definition of done" below is accurate:
-  package.json -> "typecheck": "tsc --noEmit"
-Sections at the bottom are commented out. Uncomment each one as you install that
-tool. Do not leave rules active for packages that are not in package.json.
+The Testing section at the bottom is commented out. Uncomment it once a test runner
+is installed. Do not leave rules active for packages that are not in package.json.
 ================================================================================
 -->
 
@@ -139,7 +137,7 @@ These contradict older training data. Follow them over what you remember.
   attempt a third fix.
 - Never edit `.env*`, `pnpm-lock.yaml`, or anything in `node_modules/`.
 
-## Data fetching  [enable after installing @tanstack/react-query]
+## Data fetching
 - **Hydration pattern, not plain server-fetch-and-pass-props.** The dashboard needs to
   reactively update after the agent calls a tool (a chat message should make the table/
   chart update live), so plain Server Component `await` isn't enough on its own — prefetch
@@ -151,7 +149,7 @@ These contradict older training data. Follow them over what you remember.
 - Invalidate by key prefix after a tool call lands (e.g. `['transactions', userId]`) so
   the dashboard reflects a new entry logged from either the web chat or Telegram.
 
-## Components  [enable after `pnpm dlx shadcn@latest init`]
+## Components
 - Add components with `pnpm dlx shadcn@latest add <name>`. The `shadcn-ui` package is
   deprecated — do not use it.
 - Files in `components/ui/` are generated but owned by us. Editing them is fine;
