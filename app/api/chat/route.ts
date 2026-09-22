@@ -1,6 +1,9 @@
 import * as v from "valibot";
 
-import { handleAgentMessage } from "@/lib/agent/handleAgentMessage";
+import {
+  streamAgentMessage,
+  type AgentEvent,
+} from "@/lib/agent/handleAgentMessage";
 import { ensureUser } from "@/lib/db/users";
 import { resolveDevUserId } from "@/lib/identity";
 
@@ -16,6 +19,11 @@ const BodySchema = v.object({
     v.maxLength(2000),
   ),
 });
+
+const encoder = new TextEncoder();
+
+const sse = (event: AgentEvent): Uint8Array =>
+  encoder.encode(`data: ${JSON.stringify(event)}\n\n`);
 
 export const POST = async (request: Request): Promise<Response> => {
   const identity = resolveDevUserId();
@@ -38,11 +46,39 @@ export const POST = async (request: Request): Promise<Response> => {
 
   await ensureUser(identity.userId);
 
-  const result = await handleAgentMessage({
+  const events = streamAgentMessage({
     userId: identity.userId,
     message: parsed.output.message,
     source: "web",
   });
 
-  return Response.json(result, { status: result.ok ? 200 : 422 });
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        for await (const event of events) {
+          controller.enqueue(sse(event));
+        }
+      } catch (error) {
+        // The connection is already open, so a failure has to travel as an event
+        // rather than as a status code.
+        controller.enqueue(
+          sse({
+            type: "error",
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      // no-transform stops proxies buffering the stream into one blob.
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
 };

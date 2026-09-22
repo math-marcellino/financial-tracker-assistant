@@ -1,7 +1,4 @@
-import type {
-  ChatCompletion,
-  ChatCompletionMessageParam,
-} from "groq-sdk/resources/chat/completions";
+import type { ChatCompletionMessageParam } from "groq-sdk/resources/chat/completions";
 import { and, eq } from "drizzle-orm";
 import * as v from "valibot";
 
@@ -46,6 +43,17 @@ export type AgentResult =
   | { ok: true; reply: string; transaction: Transaction | null }
   | { ok: false; error: string };
 
+/**
+ * What the loop emits as it runs. `tool` fires when a tool starts, so the UI can say what
+ * the agent is actually doing rather than showing a generic spinner; `delta` carries real
+ * tokens from Groq, not a replayed typewriter.
+ */
+export type AgentEvent =
+  | { type: "tool"; name: ToolName }
+  | { type: "delta"; text: string }
+  | { type: "done"; reply: string; transaction: Transaction | null }
+  | { type: "error"; error: string };
+
 export type HandleAgentMessageInput = {
   userId: number;
   message: string;
@@ -63,6 +71,20 @@ export type HandleAgentMessageInput = {
 const MAX_STEPS = 5;
 
 const toIsoDate = (date: Date): string => date.toISOString().slice(0, 10);
+
+/**
+ * Strips empty emphasis runs like `**   **`, which gpt-oss-120b intermittently emits as
+ * a leading artifact. Whitespace-only emphasis carries no meaning, so removing it loses
+ * nothing — the reply's actual text is untouched.
+ */
+const normalizeReply = (reply: string): string =>
+  reply
+    // Whitespace between the markers is required: without it the single-character
+    // alternative matches the two asterisks of a real `**bold**` run and eats it.
+    .replace(/(\*\*|__)\s+\1/g, "")
+    .replace(/(?<![*_])([*_])\s+\1(?![*_])/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 
 /** Keeps the upstream message intact rather than flattening it to "something went wrong". */
 const describeError = (error: unknown): string =>
@@ -281,19 +303,25 @@ const toChatMessage = (row: Message): ChatCompletionMessageParam =>
     ? { role: "user", content: row.content }
     : { role: "assistant", content: row.content };
 
-export const handleAgentMessage = async ({
+/**
+ * The canonical loop. `handleAgentMessage` below is a thin collector over this, so the
+ * Telegram webhook and the web chat share one implementation — streaming is a transport
+ * detail, not a second code path.
+ */
+export async function* streamAgentMessage({
   userId,
   message,
   source = "web",
   now = new Date(),
-}: HandleAgentMessageInput): Promise<AgentResult> => {
+}: HandleAgentMessageInput): AsyncGenerator<AgentEvent> {
   const [user] = await getDb()
     .select()
     .from(users)
     .where(eq(users.telegramId, userId));
 
   if (!user) {
-    return { ok: false, error: `No user ${userId}.` };
+    yield { type: "error", error: `No user ${userId}.` };
+    return;
   }
 
   const history = await listMessages(userId);
@@ -311,30 +339,46 @@ export const handleAgentMessage = async ({
   let affected: Transaction | null = null;
 
   for (let step = 0; step < MAX_STEPS; step += 1) {
-    let completion: ChatCompletion;
+    let content = "";
+    // tool_calls arrive split across chunks and must be reassembled by index.
+    const partials: Array<{ id?: string; name?: string; args: string }> = [];
 
     try {
-      completion = await getGroq().chat.completions.create({
+      const stream = await getGroq().chat.completions.create({
         model: LLM_MODEL,
         messages: working,
         tools: TOOL_DECLARATIONS,
+        stream: true,
       });
+
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta;
+
+        if (delta?.content) {
+          content += delta.content;
+          yield { type: "delta", text: delta.content };
+        }
+
+        for (const call of delta?.tool_calls ?? []) {
+          const index = call.index ?? 0;
+          const partial = (partials[index] ??= { args: "" });
+
+          if (call.id) partial.id = call.id;
+          if (call.function?.name) partial.name = call.function.name;
+          if (call.function?.arguments) partial.args += call.function.arguments;
+        }
+      }
     } catch (error) {
       // Surfaced, not swallowed: the caller gets the real upstream message.
-      return { ok: false, error: `LLM call failed: ${describeError(error)}` };
+      yield { type: "error", error: `LLM call failed: ${describeError(error)}` };
+      return;
     }
 
-    const assistant = completion.choices[0]?.message;
-    const calls = assistant?.tool_calls ?? [];
+    // No tool fits, so the model answered in plain text. This is the correct
+    // out-of-scope behaviour: there is deliberately no catch-all tool.
+    if (partials.length === 0) {
+      const reply = normalizeReply(content);
 
-    // No tool fits, so the model answers in plain text. This is the correct out-of-scope
-    // behaviour: there is deliberately no catch-all tool to fall back on.
-    if (calls.length === 0) {
-      const reply = assistant?.content ?? "";
-
-      // Both halves are written only once the turn completes. Persisting the user's
-      // message up front left a dangling turn behind every failure, which then replayed
-      // as context into later calls — and duplicated on every retry.
       await appendMessage({ userId, role: "user", source, content: message });
       await appendMessage({
         userId,
@@ -345,33 +389,46 @@ export const handleAgentMessage = async ({
         transactionSnapshot: affected ? toSnapshot(affected) : null,
       });
 
-      return { ok: true, reply, transaction: affected };
+      yield { type: "done", reply, transaction: affected };
+      return;
     }
 
-    working.push(assistant);
+    working.push({
+      role: "assistant",
+      content: content || null,
+      tool_calls: partials.map((partial, index) => ({
+        id: partial.id ?? `call_${index}`,
+        type: "function" as const,
+        function: { name: partial.name ?? "", arguments: partial.args || "{}" },
+      })),
+    });
 
-    // Every tool_call needs a matching tool message. Answering only the first one is a
+    // Every tool_call needs a matching tool message. Answering only the first is a
     // 400 on the next turn, so the whole batch is executed.
-    for (const call of calls) {
-      const name = call.function?.name;
+    for (const [index, partial] of partials.entries()) {
+      const name = partial.name;
 
       if (!name || !isToolName(name)) {
-        return {
-          ok: false,
+        yield {
+          type: "error",
           error: `Model proposed an unknown tool: ${name ?? "(unnamed)"}.`,
         };
+        return;
       }
+
+      yield { type: "tool", name };
 
       // Arguments arrive as a JSON *string*, so malformed JSON is its own failure mode.
       let rawArgs: unknown;
 
       try {
-        rawArgs = JSON.parse(call.function?.arguments || "{}");
+        rawArgs = JSON.parse(partial.args || "{}");
       } catch (error) {
-        return {
-          ok: false,
+        yield {
+          type: "error",
           error: `Model sent unparseable ${name} arguments: ${describeError(error)}`,
         };
+        return;
       }
 
       // A model's output is untrusted input, same as a form submission. Nothing below
@@ -380,13 +437,11 @@ export const handleAgentMessage = async ({
 
       if (!parsed.success) {
         const detail = parsed.issues
-          .map(
-            (issue) =>
-              `${v.getDotPath(issue) ?? "arguments"}: ${issue.message}`,
-          )
+          .map((issue) => `${v.getDotPath(issue) ?? "arguments"}: ${issue.message}`)
           .join("; ");
 
-        return { ok: false, error: `Invalid ${name} arguments — ${detail}` };
+        yield { type: "error", error: `Invalid ${name} arguments — ${detail}` };
+        return;
       }
 
       const { transaction, result } = await executeToolCall(
@@ -403,15 +458,32 @@ export const handleAgentMessage = async ({
 
       working.push({
         role: "tool",
-        tool_call_id: call.id,
+        tool_call_id: partial.id ?? `call_${index}`,
         content: JSON.stringify(result),
       });
     }
   }
 
   // Reported rather than papered over with whatever partial text is to hand.
-  return {
-    ok: false,
+  yield {
+    type: "error",
     error: `The agent did not finish within ${MAX_STEPS} steps.`,
   };
+}
+
+/** Collects the stream into one result, for callers that can't consume a stream. */
+export const handleAgentMessage = async (
+  input: HandleAgentMessageInput,
+): Promise<AgentResult> => {
+  for await (const event of streamAgentMessage(input)) {
+    if (event.type === "error") {
+      return { ok: false, error: event.error };
+    }
+
+    if (event.type === "done") {
+      return { ok: true, reply: event.reply, transaction: event.transaction };
+    }
+  }
+
+  return { ok: false, error: "The agent produced no result." };
 };

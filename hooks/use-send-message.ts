@@ -2,11 +2,15 @@
 
 import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 
-import type { AgentResult } from "@/lib/agent/handleAgentMessage";
+import type {
+  AgentEvent,
+  AgentResult,
+} from "@/lib/agent/handleAgentMessage";
 import { sendChatMessage } from "@/lib/api/chat";
 
-export const useSendMessage = (): UseMutationResult<
-  AgentResult,
-  Error,
-  string
-> => useMutation({ mutationFn: sendChatMessage });
+export const useSendMessage = (
+  onEvent: (event: AgentEvent) => void,
+): UseMutationResult<AgentResult, Error, string> =>
+  useMutation({
+    mutationFn: (message: string) => sendChatMessage(message, onEvent),
+  });
