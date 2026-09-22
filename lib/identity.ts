@@ -1,20 +1,31 @@
+import { readSession } from "@/lib/session";
+
 /**
- * Web identity until the Telegram Login Widget lands. Server-only: DEV_TELEGRAM_USER_ID
- * is read here and nowhere near a client component. Both routes resolve identity the same
- * way, so there is one place to replace when real auth arrives.
+ * Who the current request belongs to. One place to change when auth evolves.
+ *
+ * The dev fallback exists because the Telegram Login Widget only renders on a public
+ * HTTPS domain the bot owns — it can never work on localhost. It is refused outright in
+ * production so it cannot become an auth bypass.
  */
 export type IdentityResult =
-  { ok: true; userId: number } | { ok: false; error: string };
+  | { ok: true; userId: number }
+  | { ok: false; error: string };
 
-export const resolveDevUserId = (): IdentityResult => {
+export const resolveUserId = async (): Promise<IdentityResult> => {
+  const sessionUserId = await readSession();
+
+  if (sessionUserId !== null) {
+    return { ok: true, userId: sessionUserId };
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    return { ok: false, error: "Not signed in." };
+  }
+
   const raw = process.env.DEV_TELEGRAM_USER_ID;
 
   if (!raw) {
-    return {
-      ok: false,
-      error:
-        "DEV_TELEGRAM_USER_ID is not set, so the web chat has no identity.",
-    };
+    return { ok: false, error: "Not signed in, and DEV_TELEGRAM_USER_ID is not set." };
   }
 
   const userId = Number(raw);

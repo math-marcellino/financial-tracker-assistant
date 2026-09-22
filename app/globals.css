@@ -260,3 +260,46 @@
 [role="log"] > div {
   scrollbar-gutter: auto !important;
 }
+
+/* ---- Media-led gradient (DESIGN.md § Gradient System) ----------------- */
+/* Sanctioned use: a large media panel, not a UI fill. Deep green → black is the
+   documented product-environment gradient. */
+.co-media-gradient {
+  background:
+    radial-gradient(
+      120% 90% at 20% 15%,
+      color-mix(in oklab, var(--co-deep-green) 85%, transparent) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      100% 80% at 85% 20%,
+      color-mix(in oklab, var(--co-dark-navy) 80%, transparent) 0%,
+      transparent 65%
+    ),
+    linear-gradient(160deg, var(--co-deep-green) 0%, var(--co-black) 100%);
+}
+
+/* ---- Gradient hairline ------------------------------------------------ */
+/* A deliberate deviation from DESIGN.md's "keep UI surfaces flat": a 2px top edge on
+   the composer and transaction cards, as an accent. Recorded here so it reads as a
+   decision rather than a slip. */
+.co-gradient-edge {
+  position: relative;
+}
+.co-gradient-edge::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: 0;
+  block-size: 2px;
+  border-start-start-radius: inherit;
+  border-start-end-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    var(--co-deep-green) 0%,
+    var(--co-action-blue) 45%,
+    var(--co-coral) 100%
+  );
+  opacity: 0.85;
+  pointer-events: none;
+}

@@ -5,7 +5,7 @@ import {
   type AgentEvent,
 } from "@/lib/agent/handleAgentMessage";
 import { ensureUser } from "@/lib/db/users";
-import { resolveDevUserId } from "@/lib/identity";
+import { resolveUserId } from "@/lib/identity";
 
 // A Route Handler is a public HTTP endpoint, so the body is validated here the same way a
 // tool call is. Keep this file thin: parsing and categorization belong in the agent core,
@@ -26,7 +26,7 @@ const sse = (event: AgentEvent): Uint8Array =>
   encoder.encode(`data: ${JSON.stringify(event)}\n\n`);
 
 export const POST = async (request: Request): Promise<Response> => {
-  const identity = resolveDevUserId();
+  const identity = await resolveUserId();
 
   if (!identity.ok) {
     return Response.json({ ok: false, error: identity.error }, { status: 500 });
