@@ -10,6 +10,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -83,7 +84,36 @@ export const transactions = pgTable(
   ],
 );
 
+export const budgets = pgTable(
+  "budgets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: bigint("user_id", { mode: "number" })
+      .notNull()
+      .references(() => users.telegramId, { onDelete: "cascade" }),
+    // Expense categories only: a budget on `salary` is meaningless, and reusing the
+    // expense enum means the database is what enforces that.
+    category: transactionCategoryExpense("category").notNull(),
+    limitAmount: numeric("limit_amount", { precision: 14, scale: 2 }).notNull(),
+    currency: char("currency", { length: 3 }).notNull(),
+    // Always the 1st of the month the budget applies to.
+    month: date("month").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    // What makes set_budget an upsert rather than a duplicate-row generator.
+    uniqueIndex("budgets_user_id_category_month_idx").on(
+      table.userId,
+      table.category,
+      table.month,
+    ),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Transaction = typeof transactions.$inferSelect;
 export type NewTransaction = typeof transactions.$inferInsert;
+export type Budget = typeof budgets.$inferSelect;
+export type NewBudget = typeof budgets.$inferInsert;
