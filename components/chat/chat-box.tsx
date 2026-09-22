@@ -1,13 +1,33 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { ArrowUp } from "lucide-react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import {
+  ChatContainerContent,
+  ChatContainerRoot,
+} from "@/components/ui/chat-container";
+import { Loader } from "@/components/ui/loader";
+import {
+  PromptInput,
+  PromptInputActions,
+  PromptInputTextarea,
+} from "@/components/ui/prompt-input";
+import { PromptSuggestion } from "@/components/ui/prompt-suggestion";
+import { ScrollButton } from "@/components/ui/scroll-button";
 import { useMessages } from "@/hooks/use-messages";
 import { useSendMessage } from "@/hooks/use-send-message";
 import { messagesQueryKey } from "@/lib/api/messages";
 import type { Message, TransactionSnapshot } from "@/lib/db/schema";
+
+/** Shown only on an empty thread: one per tool group, so the read tools are discoverable. */
+const SUGGESTIONS = [
+  "spent 45k on lunch",
+  "how much did I spend on food this month?",
+  "set my groceries budget to 1.5 million",
+];
 
 /**
  * Display only. The stored value stays the exact string Postgres returned; this never
@@ -62,26 +82,6 @@ const TransactionCard = ({ snapshot }: { snapshot: TransactionSnapshot }) => {
   );
 };
 
-const Bubble = ({
-  role,
-  children,
-}: {
-  role: "user" | "assistant" | "error";
-  children: React.ReactNode;
-}) => (
-  <div
-    className={
-      role === "user"
-        ? "self-end rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground"
-        : role === "error"
-          ? "self-start rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          : "w-full max-w-md self-start rounded-lg bg-muted px-3 py-2 text-sm"
-    }
-  >
-    {children}
-  </div>
-);
-
 export const ChatBox = ({ userId }: { userId: number }) => {
   const [draft, setDraft] = useState("");
   // Errors are per-attempt and not worth storing; they live only in this view.
@@ -91,10 +91,8 @@ export const ChatBox = ({ userId }: { userId: number }) => {
     useMessages(userId);
   const { mutate, isPending } = useSendMessage();
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    const message = draft.trim();
+  const send = (text: string) => {
+    const message = text.trim();
 
     if (!message || isPending) {
       return;
@@ -121,66 +119,91 @@ export const ChatBox = ({ userId }: { userId: number }) => {
     });
   };
 
+  const isEmpty = !isLoadingHistory && messages.length === 0;
+
   return (
-    <section className="flex w-full flex-col gap-4">
-      <div className="flex flex-col gap-3">
-        {isLoadingHistory ? (
-          <p className="text-sm text-muted-foreground">Loading history…</p>
-        ) : null}
-
-        {!isLoadingHistory && messages.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Try{" "}
-            <span className="font-medium text-foreground">
-              spent 45k on lunch
-            </span>
-            , or ask{" "}
-            <span className="font-medium text-foreground">
-              how much did I spend on food this month?
-            </span>
-          </p>
-        ) : null}
-
-        {messages.map((message: Message) => (
-          <Bubble key={message.id} role={message.role}>
-            <p className="whitespace-pre-wrap">{message.content}</p>
-            {message.role === "assistant" && message.transactionSnapshot ? (
-              <TransactionCard snapshot={message.transactionSnapshot} />
+    <section className="flex min-h-0 w-full flex-1 flex-col gap-4">
+      <div className="relative min-h-0 flex-1">
+        <ChatContainerRoot className="h-full">
+          <ChatContainerContent className="flex flex-col gap-3 pb-4">
+            {isLoadingHistory ? (
+              <Loader variant="text-shimmer" text="Loading history…" size="sm" />
             ) : null}
-          </Bubble>
-        ))}
 
-        {errors.map((error, index) => (
-          <Bubble key={`error-${index}`} role="error">
-            <p className="whitespace-pre-wrap">{error}</p>
-          </Bubble>
-        ))}
+            {messages.map((message: Message) => (
+              <div
+                key={message.id}
+                className={
+                  message.role === "user"
+                    ? "max-w-md self-end rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground"
+                    : "w-full max-w-md self-start rounded-lg bg-muted px-3 py-2 text-sm"
+                }
+              >
+                <p className="whitespace-pre-wrap">{message.content}</p>
+                {message.role === "assistant" && message.transactionSnapshot ? (
+                  <TransactionCard snapshot={message.transactionSnapshot} />
+                ) : null}
+              </div>
+            ))}
 
-        {isPending ? (
-          <p className="text-sm text-muted-foreground">Thinking…</p>
-        ) : null}
+            {errors.map((error, index) => (
+              <div
+                key={`error-${index}`}
+                className="self-start rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              >
+                <p className="whitespace-pre-wrap">{error}</p>
+              </div>
+            ))}
+
+            {isPending ? (
+              <Loader variant="typing" size="md" className="self-start" />
+            ) : null}
+          </ChatContainerContent>
+
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2">
+            <ScrollButton />
+          </div>
+        </ChatContainerRoot>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex gap-2">
-        <label htmlFor="chat-message" className="sr-only">
-          Message
-        </label>
-        <input
-          id="chat-message"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+      {isEmpty ? (
+        <div className="flex flex-wrap gap-2">
+          {SUGGESTIONS.map((suggestion) => (
+            <PromptSuggestion
+              key={suggestion}
+              size="sm"
+              onClick={() => send(suggestion)}
+            >
+              {suggestion}
+            </PromptSuggestion>
+          ))}
+        </div>
+      ) : null}
+
+      <PromptInput
+        value={draft}
+        onValueChange={setDraft}
+        onSubmit={() => send(draft)}
+        isLoading={isPending}
+      >
+        <PromptInputTextarea
           placeholder="spent 45k on lunch"
-          autoComplete="off"
-          className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          aria-label="Message"
         />
-        <Button
-          type="submit"
-          size="lg"
-          disabled={isPending || draft.trim().length === 0}
-        >
-          Send
-        </Button>
-      </form>
+        {/* Not wrapped in PromptInputAction: its TooltipTrigger renders its own
+            button, which would nest one button inside another. */}
+        <PromptInputActions className="justify-end pt-2">
+          <Button
+            type="button"
+            size="icon"
+            aria-label="Send"
+            onClick={() => send(draft)}
+            disabled={isPending || draft.trim().length === 0}
+          >
+            <ArrowUp />
+          </Button>
+        </PromptInputActions>
+      </PromptInput>
     </section>
   );
 };

@@ -34,8 +34,8 @@ export default async function DashboardPage() {
   });
 
   return (
-    <div className="flex flex-1 flex-col items-center bg-background">
-      <main className="flex w-full max-w-2xl flex-1 flex-col gap-8 px-6 py-16">
+    <div className="flex min-h-0 flex-1 flex-col items-center bg-background">
+      <main className="flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-6 px-6 py-10">
         <header className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight">
             Financial tracker
