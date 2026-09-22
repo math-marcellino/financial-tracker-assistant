@@ -80,9 +80,10 @@ const buildSystemInstruction = (defaultCurrency: string, now: Date): string =>
     "If the user asks for something no tool covers, answer in plain text. Never force an unrelated tool call.",
     "To answer questions about past spending, call list_transactions or summarize_transactions. Never guess at figures or rely on the conversation for them.",
     "When the user refers to a transaction in words ('my last grocery entry'), call list_transactions first to get its id, then edit or delete it.",
-    // The chatbox renders replies as plain text, so markdown syntax would show literally.
-    "Reply in plain prose. Do not use markdown: no asterisks for emphasis, no bullet lists, no headings.",
-    "Keep replies to one short sentence. The transaction details are displayed separately, so do not restate every field.",
+    // The chatbox renders markdown now, but only inline emphasis is styled: headings and
+    // lists would come out unstyled, since the typography plugin isn't installed.
+    "Keep replies to one short sentence. You may use **bold** for an amount. No headings, no bullet lists, no code blocks.",
+    "The transaction details are displayed separately, so do not restate every field.",
   ].join("\n");
 
 /** Executes a validated call. Everything here has already passed its Valibot schema. */
