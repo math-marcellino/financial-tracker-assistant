@@ -1,4 +1,4 @@
-import type { Content, FunctionCall } from "@google/genai";
+import type { Content, FunctionCall, GenerateContentResponse } from "@google/genai";
 import { and, eq } from "drizzle-orm";
 import * as v from "valibot";
 
@@ -37,6 +37,10 @@ export type HandleAgentMessageInput = {
 };
 
 const toIsoDate = (date: Date): string => date.toISOString().slice(0, 10);
+
+/** Keeps the upstream message intact rather than flattening it to "something went wrong". */
+const describeError = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
 
 const buildSystemInstruction = (defaultCurrency: string, now: Date): string =>
   [
@@ -187,11 +191,19 @@ export const handleAgentMessage = async ({
 
   const contents: Content[] = [{ role: "user", parts: [{ text: message }] }];
 
-  const first = await getGemini().models.generateContent({
-    model: GEMINI_MODEL,
-    contents,
-    config,
-  });
+  let first: GenerateContentResponse;
+
+  try {
+    first = await getGemini().models.generateContent({
+      model: GEMINI_MODEL,
+      contents,
+      config,
+    });
+  } catch (error) {
+    // Surfaced, not swallowed: the caller gets the real upstream message instead of an
+    // opaque 500, and no tool runs.
+    return { ok: false, error: `Gemini call failed: ${describeError(error)}` };
+  }
 
   const calls: FunctionCall[] = first.functionCalls ?? [];
 
@@ -238,11 +250,21 @@ export const handleAgentMessage = async ({
     parts: [{ functionResponse: { name: call.name, response: result } }],
   });
 
-  const second = await getGemini().models.generateContent({
-    model: GEMINI_MODEL,
-    contents,
-    config,
-  });
+  // The write already landed, so a failure here must not read as "nothing happened". The
+  // transaction is still returned; only the closing sentence is missing.
+  try {
+    const second = await getGemini().models.generateContent({
+      model: GEMINI_MODEL,
+      contents,
+      config,
+    });
 
-  return { ok: true, reply: second.text ?? "", transaction };
+    return { ok: true, reply: second.text ?? "", transaction };
+  } catch (error) {
+    return {
+      ok: true,
+      reply: `Saved, but Gemini did not return a confirmation: ${describeError(error)}`,
+      transaction,
+    };
+  }
 };
