@@ -7,9 +7,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono-label);
+  --font-heading: var(--font-display);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -48,39 +48,91 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Hallmark · system: DESIGN.md (Cohere analysis) · scope: app (chat surface)
+ * canvas #ffffff · ink #212121 · near-black pill is the primary action
+ * coral is editorial taxonomy only — never a CTA, never a surface fill
+ * display: Space Grotesk (CohereText substitute) · body/UI: Inter (Unica77 substitute)
+ * Values are the exact hex from DESIGN.md, not re-derived in OKLCH — the brand numbers
+ * are the source of truth and converting them would introduce drift.
+ */
+
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* ---- DESIGN.md colour tokens ---------------------------------------- */
+  --co-canvas: #ffffff;
+  --co-black: #000000;
+  --co-primary: #17171c;
+  --co-ink: #212121;
+  --co-deep-green: #003c33;
+  --co-dark-navy: #071829;
+
+  --co-soft-stone: #eeece7;
+  --co-pale-green: #edfce9;
+  --co-pale-blue: #f1f5ff;
+
+  --co-hairline: #d9d9dd;
+  --co-border-light: #e5e7eb;
+  --co-card-border: #f2f2f2;
+
+  --co-muted: #93939f;
+  --co-slate: #75758a;
+  --co-body-muted: #616161;
+
+  --co-action-blue: #1863dc;
+  --co-focus-blue: #4c6ee6;
+  --co-form-focus: #9b60aa;
+  --co-coral: #ff7759;
+  --co-coral-soft: #ffad9b;
+  --co-error: #b30000;
+  --co-on-dark: #ffffff;
+
+  /* ---- shadcn surface mapping (every installed component inherits) ----- */
+  --background: var(--co-canvas);
+  --foreground: var(--co-ink);
+  --card: var(--co-canvas);
+  --card-foreground: var(--co-ink);
+  --popover: var(--co-canvas);
+  --popover-foreground: var(--co-ink);
+  --primary: var(--co-primary);
+  --primary-foreground: var(--co-on-dark);
+  --secondary: var(--co-soft-stone);
+  --secondary-foreground: var(--co-ink);
+  --muted: var(--co-soft-stone);
+  --muted-foreground: var(--co-body-muted);
+  --accent: var(--co-soft-stone);
+  --accent-foreground: var(--co-ink);
+  --destructive: var(--co-error);
+  --border: var(--co-hairline);
+  --input: var(--co-hairline);
+  --ring: var(--co-focus-blue);
+  --chart-1: var(--co-deep-green);
+  --chart-2: var(--co-action-blue);
+  --chart-3: var(--co-coral);
+  --chart-4: var(--co-dark-navy);
+  --chart-5: var(--co-slate);
+
+  /* ---- shape (DESIGN.md § Radius Scale) -------------------------------- */
+  --radius: 8px;
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-xl: 30px;
+  --radius-pill: 32px;
+
+  /* ---- spacing — 8px base --------------------------------------------- */
+  --space-xxs: 2px;
+  --space-xs: 6px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-xxl: 32px;
+  --space-section: 80px;
+
+  /* ---- motion ---------------------------------------------------------- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 140ms;
+  --dur-mid: 220ms;
 }
 
 .dark {
@@ -121,10 +173,90 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* Hallmark gate 34: clip, never hidden — hidden kills position:sticky. */
+  html,
+  body {
+    overflow-x: clip;
+  }
   body {
     @apply bg-background text-foreground;
   }
   html {
     @apply font-sans;
   }
+  /* Display is tight and carved, never airy, never bold — size and spacing do the
+     hierarchy work (DESIGN.md § Typography Principles). Long words wrap. */
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display), "Space Grotesk", ui-sans-serif, system-ui;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+  /* The ring appears instantly — never animated. */
+  :focus-visible {
+    outline-offset: 3px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---- Near-black pill (DESIGN.md § button-primary) --------------------- */
+/* The single highest-priority action. Flat — Cohere adds no drop shadows. */
+.co-pill {
+  background-color: var(--co-primary);
+  color: var(--co-on-dark);
+  border-radius: var(--radius-pill);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.co-pill:hover:not(:disabled) {
+  background-color: var(--co-black);
+}
+.co-pill:disabled {
+  background-color: var(--co-hairline);
+  color: var(--co-canvas);
+}
+
+/* ---- Outlined pill (DESIGN.md § button-pill-outline) ------------------ */
+/* Transparent fill, 1px dark border, 30px radius. Taxonomy and filters. */
+.co-pill-outline {
+  background-color: transparent;
+  color: var(--co-primary);
+  border: 1px solid var(--co-hairline);
+  border-radius: var(--radius-xl);
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+.co-pill-outline:hover:not(:disabled) {
+  border-color: var(--co-primary);
+  background-color: transparent;
+}
+
+/* ---- Coral taxonomy chip (DESIGN.md § blog-filter-chip) --------------- */
+/* Coral is editorial taxonomy only — never a CTA, never a surface fill. */
+.co-chip-taxonomy {
+  color: var(--co-coral);
+  border: 1px solid var(--co-coral-soft);
+  border-radius: var(--radius-sm);
+}
+
+/* ---- Chat scroller ---------------------------------------------------- */
+/* use-stick-to-bottom sets `scrollbar-gutter: stable both-edges` inline on its own
+   scroll container, which reserves gutter on BOTH sides and pushes the bar inward.
+   Only an !important rule can beat an inline style. One scrollbar, at the right edge. */
+[role="log"] > div {
+  scrollbar-gutter: auto !important;
 }

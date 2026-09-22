@@ -2,30 +2,28 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUp, Copy } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
   ChatContainerContent,
   ChatContainerRoot,
 } from "@/components/ui/chat-container";
-import { DotsLoader } from "@/components/ui/loader";
-import {
-  Message,
-  MessageActions,
-  MessageContent,
-} from "@/components/ui/message";
+import { Message, MessageActions, MessageContent } from "@/components/ui/message";
 import {
   PromptInput,
   PromptInputActions,
   PromptInputTextarea,
 } from "@/components/ui/prompt-input";
 import { PromptSuggestion } from "@/components/ui/prompt-suggestion";
+import { ResponseStream } from "@/components/ui/response-stream";
 import { ScrollButton } from "@/components/ui/scroll-button";
+import { ThinkingBar } from "@/components/ui/thinking-bar";
 import { useMessages } from "@/hooks/use-messages";
 import { useSendMessage } from "@/hooks/use-send-message";
 import { messagesQueryKey } from "@/lib/api/messages";
 import type { Message as ChatMessage, TransactionSnapshot } from "@/lib/db/schema";
+import { createPushStream, type PushStream } from "@/lib/push-stream";
 
 /** Shown only on an empty thread: one per tool group, so the read tools are discoverable. */
 const SUGGESTIONS = [
@@ -33,6 +31,16 @@ const SUGGESTIONS = [
   "how much did I spend on food this month?",
   "set my groceries budget to 1.5 million",
 ];
+
+/** What the thinking bar says while each tool runs. Plain verbs, no jargon. */
+const TOOL_LABELS: Record<string, string> = {
+  add_transaction: "Recording it",
+  edit_transaction: "Updating the entry",
+  delete_transaction: "Removing the entry",
+  set_budget: "Saving the budget",
+  list_transactions: "Looking through your records",
+  summarize_transactions: "Adding up the totals",
+};
 
 /**
  * Display only. The stored value stays the exact string Postgres returned; this never
@@ -59,31 +67,62 @@ const formatAmount = (amount: string, currency: string): string => {
   }).format(value);
 };
 
-/** Renders the snapshot stored with the turn, not the live row it came from. */
+/**
+ * Renders the snapshot stored with the turn, not the live row it came from.
+ *
+ * DESIGN.md § capability-card + research-table: flat white, thin rules instead of
+ * boxes and shadows, uppercase mono labels for system markers, and a coral chip for
+ * the category — coral is editorial taxonomy, which is exactly what a category is.
+ * The amount stays ink: the sign carries it, and coral/blue must not become broad
+ * decorative colour.
+ */
 const TransactionCard = ({ snapshot }: { snapshot: TransactionSnapshot }) => {
-  const sign = snapshot.type === "expense" ? "−" : "+";
+  const isExpense = snapshot.type === "expense";
+
+  const rows: Array<[string, React.ReactNode]> = [
+    [
+      "Amount",
+      <span key="amount" className="tabular-nums">
+        {isExpense ? "−" : "+"}
+        {formatAmount(snapshot.amount, snapshot.currency)}
+      </span>,
+    ],
+    [
+      "Category",
+      <span
+        key="category"
+        className="co-chip-taxonomy inline-block px-2.5 py-0.5 text-[0.8125rem] capitalize"
+      >
+        {snapshot.category?.replace(/_/g, " ")}
+      </span>,
+    ],
+    ["Date", <span key="date" className="tabular-nums">{snapshot.date}</span>],
+    ...(snapshot.note
+      ? ([["Note", snapshot.note]] as Array<[string, React.ReactNode]>)
+      : []),
+  ];
 
   return (
-    <dl className="mt-1 grid w-full max-w-sm grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-2xl border border-border bg-background p-4 text-sm">
-      <dt className="text-muted-foreground">Amount</dt>
-      <dd className="font-medium tabular-nums">
-        {sign}
-        {formatAmount(snapshot.amount, snapshot.currency)}
-      </dd>
-
-      <dt className="text-muted-foreground">Category</dt>
-      <dd>{snapshot.category?.replace(/_/g, " ")}</dd>
-
-      <dt className="text-muted-foreground">Date</dt>
-      <dd className="tabular-nums">{snapshot.date}</dd>
-
-      {snapshot.note ? (
-        <>
-          <dt className="text-muted-foreground">Note</dt>
-          <dd>{snapshot.note}</dd>
-        </>
-      ) : null}
-    </dl>
+    <div className="mt-4 w-full max-w-md rounded-[var(--radius-sm)] border border-[var(--co-hairline)] bg-[var(--co-canvas)] px-6 py-2">
+      <p className="border-b border-[var(--co-card-border)] py-3 font-mono text-[0.75rem] tracking-[0.28px] text-[var(--co-slate)] uppercase">
+        {isExpense ? "Expense" : "Income"}
+      </p>
+      <dl>
+        {rows.map(([label, value], index) => (
+          <div
+            key={label}
+            className={`grid grid-cols-[6.5rem_1fr] items-center gap-4 py-3 text-base ${
+              index < rows.length - 1
+                ? "border-b border-[var(--co-card-border)]"
+                : ""
+            }`}
+          >
+            <dt className="text-[0.875rem] text-[var(--co-muted)]">{label}</dt>
+            <dd className="text-[var(--co-ink)]">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 };
 
@@ -99,7 +138,7 @@ const AssistantMessage = ({ message }: { message: ChatMessage }) => {
             no-op. The text styles below are explicit instead. */}
         <MessageContent
           markdown
-          className="w-full min-w-0 flex-1 bg-transparent p-0 text-sm leading-relaxed text-foreground [&_strong]:font-semibold"
+          className="w-full min-w-0 flex-1 bg-transparent p-0 text-base leading-[1.5] text-[var(--co-ink)] [&_strong]:font-medium"
         >
           {message.content}
         </MessageContent>
@@ -129,10 +168,26 @@ export const ChatBox = ({ userId }: { userId: number }) => {
   const [draft, setDraft] = useState("");
   // Errors are per-attempt and not worth storing; they live only in this view.
   const [errors, setErrors] = useState<string[]>([]);
+  const [activeTool, setActiveTool] = useState<string | null>(null);
+  const [liveStream, setLiveStream] = useState<PushStream | null>(null);
+  const streamRef = useRef<PushStream | null>(null);
+
   const queryClient = useQueryClient();
   const { data: messages = [], isPending: isLoadingHistory } =
     useMessages(userId);
-  const { mutate, isPending } = useSendMessage();
+
+  const { mutate, isPending } = useSendMessage((event) => {
+    if (event.type === "tool") {
+      setActiveTool(event.name);
+      return;
+    }
+
+    if (event.type === "delta") {
+      // First token: the agent has stopped working and started answering.
+      setActiveTool(null);
+      streamRef.current?.push(event.text);
+    }
+  });
 
   const send = (text: string) => {
     const message = text.trim();
@@ -141,8 +196,13 @@ export const ChatBox = ({ userId }: { userId: number }) => {
       return;
     }
 
+    const stream = createPushStream();
+
+    streamRef.current = stream;
+    setLiveStream(stream);
     setDraft("");
     setErrors([]);
+    setActiveTool(null);
 
     mutate(message, {
       onSuccess: (result) => {
@@ -159,6 +219,12 @@ export const ChatBox = ({ userId }: { userId: number }) => {
       onError: (error) => {
         setErrors((current) => [...current, error.message]);
       },
+      onSettled: () => {
+        stream.close();
+        streamRef.current = null;
+        setLiveStream(null);
+        setActiveTool(null);
+      },
     });
   };
 
@@ -166,8 +232,10 @@ export const ChatBox = ({ userId }: { userId: number }) => {
 
   return (
     <section className="flex min-h-0 w-full flex-1 flex-col">
-      <ChatContainerRoot className="relative min-h-0 flex-1 space-y-0 overflow-y-auto">
-        <ChatContainerContent className="space-y-8 py-4">
+      {/* Full-bleed scroller: the scrollbar belongs at the window edge, not at the
+          edge of the reading column. Only one element in this tree scrolls. */}
+      <ChatContainerRoot className="relative min-h-0 flex-1 space-y-0">
+        <ChatContainerContent className="mx-auto w-full max-w-2xl space-y-8 px-6 py-4">
           {messages.map((message: ChatMessage) =>
             message.role === "assistant" ? (
               <AssistantMessage key={message.id} message={message} />
@@ -176,16 +244,37 @@ export const ChatBox = ({ userId }: { userId: number }) => {
                 key={message.id}
                 className="flex w-full flex-col items-end gap-2"
               >
-                <MessageContent className="max-w-[85%] rounded-3xl bg-muted px-5 py-2.5 text-sm whitespace-pre-wrap text-foreground sm:max-w-[75%]">
+                <MessageContent className="max-w-[85%] rounded-[var(--radius-md)] bg-[var(--co-soft-stone)] px-5 py-3 text-base leading-[1.5] whitespace-pre-wrap text-[var(--co-ink)] sm:max-w-[75%]">
                   {message.content}
                 </MessageContent>
               </Message>
             ),
           )}
 
-          {isPending ? (
+          {/* While a tool runs, say which one. The shimmer is the only thing moving. */}
+          {isPending && activeTool ? (
             <Message className="flex w-full flex-col items-start gap-2">
-              <DotsLoader />
+              <ThinkingBar
+                className="max-w-xs"
+                text={TOOL_LABELS[activeTool] ?? "Working"}
+              />
+            </Message>
+          ) : null}
+
+          {/* Real tokens from Groq, not a replayed typewriter. */}
+          {isPending && liveStream && !activeTool ? (
+            <Message className="flex w-full flex-col items-start gap-2">
+              <ResponseStream
+                textStream={liveStream.iterable}
+                mode="fade"
+                className="w-full text-base leading-[1.5] text-[var(--co-ink)]"
+              />
+            </Message>
+          ) : null}
+
+          {isPending && !liveStream && !activeTool ? (
+            <Message className="flex w-full flex-col items-start gap-2">
+              <ThinkingBar className="max-w-xs" text="Thinking" />
             </Message>
           ) : null}
 
@@ -194,9 +283,13 @@ export const ChatBox = ({ userId }: { userId: number }) => {
               key={`error-${index}`}
               className="flex w-full flex-col items-start gap-2"
             >
-              <div className="flex min-w-0 flex-row items-center gap-2 rounded-lg border-2 border-destructive/40 bg-destructive/10 px-3 py-2">
-                <AlertTriangle size={16} className="shrink-0 text-destructive" />
-                <p className="text-sm whitespace-pre-wrap text-destructive">
+              <div className="flex min-w-0 flex-row items-start gap-2.5 rounded-[var(--radius-sm)] border border-[var(--co-hairline)] bg-[var(--co-canvas)] px-4 py-3">
+                <AlertTriangle
+                  size={16}
+                  className="mt-0.5 shrink-0"
+                  style={{ color: "var(--co-error)" }}
+                />
+                <p className="text-base whitespace-pre-wrap text-[var(--co-ink)]">
                   {error}
                 </p>
               </div>
@@ -204,17 +297,19 @@ export const ChatBox = ({ userId }: { userId: number }) => {
           ))}
         </ChatContainerContent>
 
-        <div className="absolute bottom-2 left-1/2 -translate-x-1/2">
-          <ScrollButton />
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2">
+          <ScrollButton className="co-pill-outline rounded-full bg-[var(--co-canvas)]" />
         </div>
       </ChatContainerRoot>
 
       {isEmpty ? (
-        <div className="flex shrink-0 flex-wrap gap-2 pb-3">
+        <div className="mx-auto flex w-full max-w-2xl shrink-0 flex-wrap gap-2 px-6 pb-4">
           {SUGGESTIONS.map((suggestion) => (
             <PromptSuggestion
               key={suggestion}
               size="sm"
+              variant="ghost"
+              className="co-pill-outline px-3.5 text-[0.875rem]"
               onClick={() => send(suggestion)}
             >
               {suggestion}
@@ -223,22 +318,22 @@ export const ChatBox = ({ userId }: { userId: number }) => {
         </div>
       ) : null}
 
-      <div className="shrink-0">
+      <div className="mx-auto w-full max-w-2xl shrink-0 px-6 pb-6">
         <PromptInput
           value={draft}
           onValueChange={setDraft}
           onSubmit={() => send(draft)}
           isLoading={isPending}
-          className="relative z-10 w-full rounded-3xl border border-input bg-popover p-0 pt-1 shadow-xs"
+          className="relative z-10 w-full rounded-[var(--radius-xs)] border border-[var(--co-hairline)] bg-[var(--co-canvas)] p-0 pt-1 transition-[border-color] duration-150 focus-within:border-[var(--co-form-focus)]"
         >
           <div className="flex flex-col">
             <PromptInputTextarea
               placeholder="Ask anything, or log an expense"
               aria-label="Message"
-              className="min-h-[44px] pt-3 pl-4 text-base leading-[1.3] sm:text-base md:text-base"
+              className="min-h-[46px] pt-3 pl-4 text-base leading-[1.35] sm:text-base md:text-base"
             />
 
-            <PromptInputActions className="mt-3 flex w-full items-center justify-between gap-2 p-2">
+            <PromptInputActions className="mt-2 flex w-full items-center justify-between gap-2 p-2">
               <div />
               {/* Not wrapped in PromptInputAction/MessageAction: their TooltipTrigger
                   renders its own button, which would nest one button inside another. */}
@@ -247,7 +342,7 @@ export const ChatBox = ({ userId }: { userId: number }) => {
                 size="icon"
                 aria-label="Send"
                 title="Send"
-                className="size-9 rounded-full"
+                className="co-pill size-10 rounded-full"
                 onClick={() => send(draft)}
                 disabled={isPending || draft.trim().length === 0}
               >
