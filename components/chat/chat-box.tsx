@@ -7,8 +7,7 @@ import { Button } from "@/components/ui/button";
 import { useMessages } from "@/hooks/use-messages";
 import { useSendMessage } from "@/hooks/use-send-message";
 import { messagesQueryKey } from "@/lib/api/messages";
-import type { MessageWithTransaction } from "@/lib/db/messages";
-import type { Transaction } from "@/lib/db/schema";
+import type { Message, TransactionSnapshot } from "@/lib/db/schema";
 
 /**
  * Display only. The stored value stays the exact string Postgres returned; this never
@@ -35,28 +34,28 @@ const formatAmount = (amount: string, currency: string): string => {
   }).format(value);
 };
 
-const TransactionCard = ({ transaction }: { transaction: Transaction }) => {
-  const category = transaction.categoryExpense ?? transaction.categoryIncome;
-  const sign = transaction.type === "expense" ? "−" : "+";
+/** Renders the snapshot stored with the turn, not the live row it came from. */
+const TransactionCard = ({ snapshot }: { snapshot: TransactionSnapshot }) => {
+  const sign = snapshot.type === "expense" ? "−" : "+";
 
   return (
     <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-lg border border-border bg-background p-3 text-sm">
       <dt className="text-muted-foreground">Amount</dt>
       <dd className="font-medium tabular-nums">
         {sign}
-        {formatAmount(transaction.amount, transaction.currency)}
+        {formatAmount(snapshot.amount, snapshot.currency)}
       </dd>
 
       <dt className="text-muted-foreground">Category</dt>
-      <dd>{category?.replace(/_/g, " ")}</dd>
+      <dd>{snapshot.category?.replace(/_/g, " ")}</dd>
 
       <dt className="text-muted-foreground">Date</dt>
-      <dd className="tabular-nums">{transaction.date}</dd>
+      <dd className="tabular-nums">{snapshot.date}</dd>
 
-      {transaction.note ? (
+      {snapshot.note ? (
         <>
           <dt className="text-muted-foreground">Note</dt>
-          <dd>{transaction.note}</dd>
+          <dd>{snapshot.note}</dd>
         </>
       ) : null}
     </dl>
@@ -142,11 +141,11 @@ export const ChatBox = ({ userId }: { userId: number }) => {
           </p>
         ) : null}
 
-        {messages.map((message: MessageWithTransaction) => (
+        {messages.map((message: Message) => (
           <Bubble key={message.id} role={message.role}>
             <p className="whitespace-pre-wrap">{message.content}</p>
-            {message.role === "assistant" && message.transaction ? (
-              <TransactionCard transaction={message.transaction} />
+            {message.role === "assistant" && message.transactionSnapshot ? (
+              <TransactionCard snapshot={message.transactionSnapshot} />
             ) : null}
           </Bubble>
         ))}

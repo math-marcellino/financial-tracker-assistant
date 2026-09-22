@@ -28,6 +28,7 @@ import {
   users,
   type Message,
   type Transaction,
+  type TransactionSnapshot,
 } from "@/lib/db/schema";
 import {
   listTransactionsFor,
@@ -262,6 +263,17 @@ const executeToolCall = async (
   return { transaction: null, result: { status: "saved", id: row.id, month } };
 };
 
+/** Frozen at the time of the turn, so the card can never drift from the reply text. */
+const toSnapshot = (transaction: Transaction): TransactionSnapshot => ({
+  id: transaction.id,
+  amount: transaction.amount,
+  currency: transaction.currency,
+  type: transaction.type,
+  category: transaction.categoryExpense ?? transaction.categoryIncome,
+  date: transaction.date,
+  note: transaction.note,
+});
+
 /** Stored turns replay as plain text; tool traffic is never persisted or replayed. */
 const toChatMessage = (row: Message): ChatCompletionMessageParam =>
   row.role === "user"
@@ -329,6 +341,7 @@ export const handleAgentMessage = async ({
         source,
         content: reply,
         transactionId: affected?.id ?? null,
+        transactionSnapshot: affected ? toSnapshot(affected) : null,
       });
 
       return { ok: true, reply, transaction: affected };

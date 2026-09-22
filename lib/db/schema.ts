@@ -5,6 +5,7 @@ import {
   check,
   date,
   index,
+  jsonb,
   numeric,
   pgEnum,
   pgTable,
@@ -127,6 +128,17 @@ export const budgets = pgTable(
   ],
 );
 
+/** The transaction fields the chat card renders, frozen at the time of the turn. */
+export type TransactionSnapshot = {
+  id: string;
+  amount: string;
+  currency: string;
+  type: "income" | "expense";
+  category: string | null;
+  date: string;
+  note: string | null;
+};
+
 export const messageRole = pgEnum("message_role", ["user", "assistant"]);
 export const messageSource = pgEnum("message_source", ["web", "telegram"]);
 
@@ -147,11 +159,17 @@ export const messages = pgTable(
     // One thread per user across both surfaces, which already share telegram_id.
     source: messageSource("source").notNull(),
     content: text("content").notNull(),
-    // Lets stored history render its transaction card again. `set null` so deleting a
-    // transaction doesn't take the message that announced it.
+    // Which row this turn touched. `set null` so deleting a transaction doesn't take the
+    // message that announced it.
     transactionId: uuid("transaction_id").references(() => transactions.id, {
       onDelete: "set null",
     }),
+    // The values as they were when this turn happened. The reply text is frozen prose, so
+    // a card rendered from the live row would contradict the sentence above it the moment
+    // the transaction is edited. A transcript records what happened, not what is true now.
+    transactionSnapshot: jsonb(
+      "transaction_snapshot",
+    ).$type<TransactionSnapshot>(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
