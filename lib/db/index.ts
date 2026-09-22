@@ -3,12 +3,24 @@ import { drizzle } from "drizzle-orm/neon-http";
 
 import * as schema from "@/lib/db/schema";
 
-const databaseUrl = process.env.DATABASE_URL;
+type Database = ReturnType<typeof drizzle<typeof schema>>;
 
-if (!databaseUrl) {
-  throw new Error("DATABASE_URL is not set.");
-}
+// Same reason as lib/agent/gemini.ts: connect on first query, so a missing DATABASE_URL
+// fails the request that needs it instead of the build.
+let client: Database | undefined;
 
-export const db = drizzle(neon(databaseUrl), { schema });
+export const getDb = (): Database => {
+  if (!client) {
+    const databaseUrl = process.env.DATABASE_URL;
+
+    if (!databaseUrl) {
+      throw new Error("DATABASE_URL is not set.");
+    }
+
+    client = drizzle(neon(databaseUrl), { schema });
+  }
+
+  return client;
+};
 
 export { schema };
