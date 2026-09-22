@@ -1,4 +1,4 @@
-import type { FunctionDeclaration } from "@google/genai";
+import type { ChatCompletionTool } from "groq-sdk/resources/chat/completions";
 import * as v from "valibot";
 
 import {
@@ -9,7 +9,7 @@ import {
 
 /**
  * The product's capability boundary. Everything the AI is allowed to do is declared here
- * once, in two forms that must stay in lockstep: the declarations Gemini sees, and the
+ * once, in two forms that must stay in lockstep: the declarations the model sees, and the
  * Valibot schemas our code validates against before touching Postgres.
  *
  * Adding a tool here widens what the product can do. That is a scope decision.
@@ -32,10 +32,16 @@ const AmountSchema = v.pipe(
 const DateSchema = v.pipe(
   v.string(),
   v.regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD."),
-  v.check((value) => !Number.isNaN(Date.parse(value)), "Date is not a real calendar date."),
+  v.check(
+    (value) => !Number.isNaN(Date.parse(value)),
+    "Date is not a real calendar date.",
+  ),
 );
 
-const MonthSchema = v.pipe(v.string(), v.regex(/^\d{4}-\d{2}$/, "Month must be YYYY-MM."));
+const MonthSchema = v.pipe(
+  v.string(),
+  v.regex(/^\d{4}-\d{2}$/, "Month must be YYYY-MM."),
+);
 
 const CurrencySchema = v.pipe(
   v.string(),
@@ -51,7 +57,10 @@ const CategorySchema = v.picklist(
   "Unknown category.",
 );
 
-const TypeSchema = v.picklist(TRANSACTION_TYPES, "Type must be 'income' or 'expense'.");
+const TypeSchema = v.picklist(
+  TRANSACTION_TYPES,
+  "Type must be 'income' or 'expense'.",
+);
 
 /**
  * The model gets one flat `category` argument; the two-column storage split is ours, not
@@ -111,7 +120,10 @@ export const EditTransactionSchema = v.pipe(
 export const DeleteTransactionSchema = v.object({ id: IdSchema });
 
 export const SetBudgetSchema = v.object({
-  category: v.picklist(EXPENSE_CATEGORIES, "Budgets can only be set on expense categories."),
+  category: v.picklist(
+    EXPENSE_CATEGORIES,
+    "Budgets can only be set on expense categories.",
+  ),
   limit: AmountSchema,
   month: v.optional(MonthSchema),
   currency: v.optional(CurrencySchema),
@@ -126,86 +138,118 @@ export const TOOL_SCHEMAS = {
 
 export type ToolName = keyof typeof TOOL_SCHEMAS;
 
-export const isToolName = (name: string): name is ToolName => name in TOOL_SCHEMAS;
+export const isToolName = (name: string): name is ToolName =>
+  name in TOOL_SCHEMAS;
 
 export type AddTransactionArgs = v.InferOutput<typeof AddTransactionSchema>;
 export type EditTransactionArgs = v.InferOutput<typeof EditTransactionSchema>;
-export type DeleteTransactionArgs = v.InferOutput<typeof DeleteTransactionSchema>;
+export type DeleteTransactionArgs = v.InferOutput<
+  typeof DeleteTransactionSchema
+>;
 export type SetBudgetArgs = v.InferOutput<typeof SetBudgetSchema>;
 
 const amountProperty = {
   type: "number",
-  description: "Positive amount in major units. Expand shorthand: 45k is 45000.",
+  description:
+    "Positive amount in major units. Expand shorthand: 45k is 45000.",
 } as const;
 
 const currencyProperty = {
   type: "string",
-  description: "ISO-4217 code. Omit unless the user names a currency explicitly.",
+  description:
+    "ISO-4217 code. Omit unless the user names a currency explicitly.",
 } as const;
 
-export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
+export const TOOL_DECLARATIONS: ChatCompletionTool[] = [
   {
-    name: "add_transaction",
-    description: "Record a new income or expense the user just reported.",
-    parametersJsonSchema: {
-      type: "object",
-      properties: {
-        amount: amountProperty,
-        type: { type: "string", enum: [...TRANSACTION_TYPES] },
-        category: {
-          type: "string",
-          enum: [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES],
-          description: "Must belong to the chosen type.",
+    type: "function",
+    function: {
+      name: "add_transaction",
+      description: "Record a new income or expense the user just reported.",
+      parameters: {
+        type: "object",
+        properties: {
+          amount: amountProperty,
+          type: { type: "string", enum: [...TRANSACTION_TYPES] },
+          category: {
+            type: "string",
+            enum: [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES],
+            description: "Must belong to the chosen type.",
+          },
+          date: {
+            type: "string",
+            description: "YYYY-MM-DD. Use today unless stated.",
+          },
+          note: {
+            type: "string",
+            description: "Short free-text detail, if any.",
+          },
+          currency: currencyProperty,
         },
-        date: { type: "string", description: "YYYY-MM-DD. Use today unless stated." },
-        note: { type: "string", description: "Short free-text detail, if any." },
-        currency: currencyProperty,
+        required: ["amount", "type", "category", "date"],
       },
-      required: ["amount", "type", "category", "date"],
     },
   },
   {
-    name: "edit_transaction",
-    description:
-      "Change fields on an existing transaction. Only call this with an id the user has been shown.",
-    parametersJsonSchema: {
-      type: "object",
-      properties: {
-        id: { type: "string", description: "UUID of the transaction to edit." },
-        amount: amountProperty,
-        type: { type: "string", enum: [...TRANSACTION_TYPES] },
-        category: {
-          type: "string",
-          enum: [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES],
+    type: "function",
+    function: {
+      name: "edit_transaction",
+      description:
+        "Change fields on an existing transaction. Only call this with an id the user has been shown.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            description: "UUID of the transaction to edit.",
+          },
+          amount: amountProperty,
+          type: { type: "string", enum: [...TRANSACTION_TYPES] },
+          category: {
+            type: "string",
+            enum: [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES],
+          },
+          date: { type: "string", description: "YYYY-MM-DD." },
+          note: { type: "string" },
+          currency: currencyProperty,
         },
-        date: { type: "string", description: "YYYY-MM-DD." },
-        note: { type: "string" },
-        currency: currencyProperty,
+        required: ["id"],
       },
-      required: ["id"],
     },
   },
   {
-    name: "delete_transaction",
-    description: "Delete a transaction the user asked to remove.",
-    parametersJsonSchema: {
-      type: "object",
-      properties: { id: { type: "string", description: "UUID of the transaction." } },
-      required: ["id"],
+    type: "function",
+    function: {
+      name: "delete_transaction",
+      description: "Delete a transaction the user asked to remove.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "UUID of the transaction." },
+        },
+        required: ["id"],
+      },
     },
   },
   {
-    name: "set_budget",
-    description: "Set or update a monthly spending limit for one expense category.",
-    parametersJsonSchema: {
-      type: "object",
-      properties: {
-        category: { type: "string", enum: [...EXPENSE_CATEGORIES] },
-        limit: amountProperty,
-        month: { type: "string", description: "YYYY-MM. Defaults to the current month." },
-        currency: currencyProperty,
+    type: "function",
+    function: {
+      name: "set_budget",
+      description:
+        "Set or update a monthly spending limit for one expense category.",
+      parameters: {
+        type: "object",
+        properties: {
+          category: { type: "string", enum: [...EXPENSE_CATEGORIES] },
+          limit: amountProperty,
+          month: {
+            type: "string",
+            description: "YYYY-MM. Defaults to the current month.",
+          },
+          currency: currencyProperty,
+        },
+        required: ["category", "limit"],
       },
-      required: ["category", "limit"],
     },
   },
 ];

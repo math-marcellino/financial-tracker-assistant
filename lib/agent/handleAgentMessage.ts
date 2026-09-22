@@ -1,8 +1,11 @@
-import type { Content, FunctionCall, GenerateContentResponse } from "@google/genai";
+import type {
+  ChatCompletion,
+  ChatCompletionMessageParam,
+} from "groq-sdk/resources/chat/completions";
 import { and, eq } from "drizzle-orm";
 import * as v from "valibot";
 
-import { GEMINI_MODEL, getGemini } from "@/lib/agent/gemini";
+import { LLM_MODEL, getGroq } from "@/lib/agent/llm";
 import {
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
@@ -16,7 +19,12 @@ import {
   type ToolName,
 } from "@/lib/agent/tools";
 import { getDb } from "@/lib/db";
-import { budgets, transactions, users, type Transaction } from "@/lib/db/schema";
+import {
+  budgets,
+  transactions,
+  users,
+  type Transaction,
+} from "@/lib/db/schema";
 
 /**
  * The single canonical implementation of the agent loop. A plain function on purpose: no
@@ -61,7 +69,10 @@ const executeToolCall = async (
   userId: number,
   defaultCurrency: string,
   now: Date,
-): Promise<{ transaction: Transaction | null; result: Record<string, unknown> }> => {
+): Promise<{
+  transaction: Transaction | null;
+  result: Record<string, unknown>;
+}> => {
   if (name === "add_transaction") {
     const input = args as AddTransactionArgs;
     const isExpense = input.type === "expense";
@@ -74,8 +85,12 @@ const executeToolCall = async (
         currency: input.currency ?? defaultCurrency,
         type: input.type,
         // The model sees one flat category; the two-column split is ours.
-        categoryExpense: isExpense ? (input.category as Transaction["categoryExpense"]) : null,
-        categoryIncome: isExpense ? null : (input.category as Transaction["categoryIncome"]),
+        categoryExpense: isExpense
+          ? (input.category as Transaction["categoryExpense"])
+          : null,
+        categoryIncome: isExpense
+          ? null
+          : (input.category as Transaction["categoryIncome"]),
         date: input.date,
         note: input.note ?? null,
       })
@@ -90,10 +105,15 @@ const executeToolCall = async (
     const [existing] = await getDb()
       .select()
       .from(transactions)
-      .where(and(eq(transactions.id, input.id), eq(transactions.userId, userId)));
+      .where(
+        and(eq(transactions.id, input.id), eq(transactions.userId, userId)),
+      );
 
     if (!existing) {
-      return { transaction: null, result: { status: "not_found", id: input.id } };
+      return {
+        transaction: null,
+        result: { status: "not_found", id: input.id },
+      };
     }
 
     // A category can arrive without a type, so the effective type has to come from the
@@ -117,7 +137,8 @@ const executeToolCall = async (
       }
     }
 
-    const category = input.category ?? existing.categoryExpense ?? existing.categoryIncome;
+    const category =
+      input.category ?? existing.categoryExpense ?? existing.categoryIncome;
     const isExpense = effectiveType === "expense";
 
     const [row] = await getDb()
@@ -128,10 +149,16 @@ const executeToolCall = async (
         ...(input.date !== undefined && { date: input.date }),
         ...(input.note !== undefined && { note: input.note }),
         type: effectiveType,
-        categoryExpense: isExpense ? (category as Transaction["categoryExpense"]) : null,
-        categoryIncome: isExpense ? null : (category as Transaction["categoryIncome"]),
+        categoryExpense: isExpense
+          ? (category as Transaction["categoryExpense"])
+          : null,
+        categoryIncome: isExpense
+          ? null
+          : (category as Transaction["categoryIncome"]),
       })
-      .where(and(eq(transactions.id, input.id), eq(transactions.userId, userId)))
+      .where(
+        and(eq(transactions.id, input.id), eq(transactions.userId, userId)),
+      )
       .returning();
 
     return { transaction: row, result: { status: "updated", id: row.id } };
@@ -142,12 +169,16 @@ const executeToolCall = async (
 
     const [row] = await getDb()
       .delete(transactions)
-      .where(and(eq(transactions.id, input.id), eq(transactions.userId, userId)))
+      .where(
+        and(eq(transactions.id, input.id), eq(transactions.userId, userId)),
+      )
       .returning();
 
     return {
       transaction: null,
-      result: row ? { status: "deleted", id: row.id } : { status: "not_found", id: input.id },
+      result: row
+        ? { status: "deleted", id: row.id }
+        : { status: "not_found", id: input.id },
     };
   }
 
@@ -166,7 +197,11 @@ const executeToolCall = async (
     })
     .onConflictDoUpdate({
       target: [budgets.userId, budgets.category, budgets.month],
-      set: { limitAmount: input.limit.toFixed(2), currency, updatedAt: new Date() },
+      set: {
+        limitAmount: input.limit.toFixed(2),
+        currency,
+        updatedAt: new Date(),
+      },
     })
     .returning();
 
@@ -178,92 +213,114 @@ export const handleAgentMessage = async ({
   message,
   now = new Date(),
 }: HandleAgentMessageInput): Promise<AgentResult> => {
-  const [user] = await getDb().select().from(users).where(eq(users.telegramId, userId));
+  const [user] = await getDb()
+    .select()
+    .from(users)
+    .where(eq(users.telegramId, userId));
 
   if (!user) {
     return { ok: false, error: `No user ${userId}.` };
   }
 
-  const config = {
-    systemInstruction: buildSystemInstruction(user.defaultCurrency, now),
-    tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
-  };
+  const messages: ChatCompletionMessageParam[] = [
+    {
+      role: "system",
+      content: buildSystemInstruction(user.defaultCurrency, now),
+    },
+    { role: "user", content: message },
+  ];
 
-  const contents: Content[] = [{ role: "user", parts: [{ text: message }] }];
-
-  let first: GenerateContentResponse;
+  let first: ChatCompletion;
 
   try {
-    first = await getGemini().models.generateContent({
-      model: GEMINI_MODEL,
-      contents,
-      config,
+    first = await getGroq().chat.completions.create({
+      model: LLM_MODEL,
+      messages,
+      tools: TOOL_DECLARATIONS,
     });
   } catch (error) {
     // Surfaced, not swallowed: the caller gets the real upstream message instead of an
     // opaque 500, and no tool runs.
-    return { ok: false, error: `Gemini call failed: ${describeError(error)}` };
+    return { ok: false, error: `LLM call failed: ${describeError(error)}` };
   }
 
-  const calls: FunctionCall[] = first.functionCalls ?? [];
+  const assistant = first.choices[0]?.message;
+  const calls = assistant?.tool_calls ?? [];
 
   // No tool fits what was asked, so the model answers in plain text. This is the correct
   // out-of-scope behaviour: there is deliberately no catch-all tool to fall back on.
   if (calls.length === 0) {
-    return { ok: true, reply: first.text ?? "", transaction: null };
+    return { ok: true, reply: assistant?.content ?? "", transaction: null };
   }
 
   const [call] = calls;
+  const name = call.function?.name;
 
-  if (!call.name || !isToolName(call.name)) {
-    return { ok: false, error: `Model proposed an unknown tool: ${call.name ?? "(unnamed)"}.` };
+  if (!name || !isToolName(name)) {
+    return {
+      ok: false,
+      error: `Model proposed an unknown tool: ${name ?? "(unnamed)"}.`,
+    };
+  }
+
+  // Arguments arrive as a JSON *string*, so malformed JSON is its own failure mode and
+  // must not throw past the caller.
+  let rawArgs: unknown;
+
+  try {
+    rawArgs = JSON.parse(call.function?.arguments || "{}");
+  } catch (error) {
+    return {
+      ok: false,
+      error: `Model sent unparseable ${name} arguments: ${describeError(error)}`,
+    };
   }
 
   // A model's output is untrusted input, same as a form submission. Nothing below this
   // line runs unless the arguments parse.
-  const parsed = v.safeParse(TOOL_SCHEMAS[call.name], call.args ?? {});
+  const parsed = v.safeParse(TOOL_SCHEMAS[name], rawArgs);
 
   if (!parsed.success) {
     const detail = parsed.issues
       .map((issue) => `${v.getDotPath(issue) ?? "arguments"}: ${issue.message}`)
       .join("; ");
 
-    return { ok: false, error: `Invalid ${call.name} arguments — ${detail}` };
+    return { ok: false, error: `Invalid ${name} arguments — ${detail}` };
   }
 
   const { transaction, result } = await executeToolCall(
-    call.name,
+    name,
     parsed.output,
     userId,
     user.defaultCurrency,
     now,
   );
 
-  const modelContent = first.candidates?.[0]?.content;
-
-  if (modelContent) {
-    contents.push(modelContent);
-  }
-
-  contents.push({
-    role: "user",
-    parts: [{ functionResponse: { name: call.name, response: result } }],
+  messages.push(assistant);
+  messages.push({
+    role: "tool",
+    tool_call_id: call.id,
+    content: JSON.stringify(result),
   });
 
   // The write already landed, so a failure here must not read as "nothing happened". The
   // transaction is still returned; only the closing sentence is missing.
   try {
-    const second = await getGemini().models.generateContent({
-      model: GEMINI_MODEL,
-      contents,
-      config,
+    const second = await getGroq().chat.completions.create({
+      model: LLM_MODEL,
+      messages,
+      tools: TOOL_DECLARATIONS,
     });
 
-    return { ok: true, reply: second.text ?? "", transaction };
+    return {
+      ok: true,
+      reply: second.choices[0]?.message?.content ?? "",
+      transaction,
+    };
   } catch (error) {
     return {
       ok: true,
-      reply: `Saved, but Gemini did not return a confirmation: ${describeError(error)}`,
+      reply: `Saved, but the model did not return a confirmation: ${describeError(error)}`,
       transaction,
     };
   }
