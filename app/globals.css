@@ -202,6 +202,19 @@
   }
 }
 
+/* ---- Text shimmer (prompt-kit text-shimmer) -------------------------- */
+/* The registry item ships these keyframes as a tailwind.config entry, which the
+   shadcn CLI can't apply under Tailwind v4 — so `animate-[shimmer_…]` pointed at a
+   name that didn't exist and the loading labels sat still. Values are the registry's. */
+@keyframes shimmer {
+  0% {
+    background-position: 200% 50%;
+  }
+  100% {
+    background-position: -200% 50%;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
