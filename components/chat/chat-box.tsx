@@ -2,7 +2,8 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUp, Copy, Paperclip, X } from "lucide-react";
-import { useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useStickToBottomContext } from "use-stick-to-bottom";
 
 import { HelpCard } from "@/components/chat/help-card";
 import { ModelPicker } from "@/components/chat/model-picker";
@@ -116,6 +117,24 @@ const TransactionCard = ({ snapshot }: { snapshot: TransactionSnapshot }) => {
       </dl>
     </div>
   );
+};
+
+/**
+ * The scroller only follows new content while it is already pinned to the bottom, so a
+ * reader who had scrolled up never saw the next bubble land. Any change to the thread —
+ * a message sent, a reply arriving, one logged from Telegram — scrolls back down and
+ * re-pins, so a reply that streams in afterwards stays in view too.
+ *
+ * A child of ChatContainerRoot, because the scroll controls live in its context.
+ */
+const ScrollOnNewMessage = ({ trigger }: { trigger: string }) => {
+  const { scrollToBottom } = useStickToBottomContext();
+
+  useEffect(() => {
+    void scrollToBottom("smooth");
+  }, [trigger, scrollToBottom]);
+
+  return null;
 };
 
 const AssistantMessage = ({ message }: { message: ChatMessage }) => {
@@ -393,6 +412,10 @@ export const ChatBox = ({ userId }: { userId: number }) => {
             </Message>
           ))}
         </ChatContainerContent>
+
+        <ScrollOnNewMessage
+          trigger={`${messages.length}:${isPending}:${activeTool ?? ""}:${errors.length}:${showHelp}`}
+        />
 
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2">
           <ScrollButton className="co-pill-outline rounded-full bg-[var(--co-canvas)]" />
