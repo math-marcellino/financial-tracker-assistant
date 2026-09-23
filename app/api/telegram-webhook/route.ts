@@ -1,5 +1,6 @@
 import { Bot, webhookCallback, type Context } from "grammy";
 
+import { CAPABILITIES } from "@/lib/agent/capabilities";
 import { handleAgentMessage } from "@/lib/agent/handleAgentMessage";
 import { appBaseUrl, createLoginToken } from "@/lib/auth/login-token";
 import type { Transaction } from "@/lib/db/schema";
@@ -92,6 +93,37 @@ const requireRegistered = async (
   return { id: from.id };
 };
 
+const escapeHtml = (text: string): string =>
+  text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/**
+ * The same capability list the web chat's /help renders, formatted for Telegram. An
+ * unknown sender is told how to get an account first, since nothing else will work
+ * for them until they do.
+ */
+const helpMessage = (registered: boolean, greeting: boolean): string => {
+  const items = Object.values(CAPABILITIES).map(
+    (capability) =>
+      `<b>${escapeHtml(capability.title)}</b>\n${escapeHtml(capability.description)}\n<i>“${escapeHtml(capability.example)}”</i>`,
+  );
+
+  return [
+    ...(greeting
+      ? [
+          "I keep track of your money from plain-language messages. Tell me what you spent or earned, and ask me about it later.",
+        ]
+      : []),
+    ...(registered
+      ? []
+      : [
+          `First, send /login to get a sign-in link. That creates your account, and you can use the dashboard at ${escapeHtml(appBaseUrl())} too.`,
+        ]),
+    "<b>What I can do</b>",
+    ...items,
+    "Send /help any time to see this again.",
+  ].join("\n\n");
+};
+
 const toTelegramHtml = (text: string): string =>
   text
     // Escaping first, so a literal "<" in a note can't become markup.
@@ -154,6 +186,23 @@ const getHandler = () => {
       { link_preview_options: { is_disabled: true } },
     );
   });
+
+  /**
+   * /start and /help are open to anyone, like /login: they are one indexed read and a
+   * canned reply, never an LLM call or a write. Registered before the text handler,
+   * which would otherwise send "/help" to the model.
+   */
+  const replyWithHelp = async (ctx: Context, greeting: boolean) => {
+    const registered = ctx.from ? (await findUser(ctx.from.id)) !== null : false;
+
+    await ctx.reply(helpMessage(registered, greeting), {
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+    });
+  };
+
+  bot.command("start", (ctx) => replyWithHelp(ctx, true));
+  bot.command("help", (ctx) => replyWithHelp(ctx, false));
 
   /**
    * A receipt photo. Telegram hosts the file, so it is fetched, read once and dropped —

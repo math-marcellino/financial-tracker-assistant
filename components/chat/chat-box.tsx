@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUp, Copy, Paperclip, X } from "lucide-react";
 import { useRef, useState, type ChangeEvent } from "react";
 
+import { HelpCard } from "@/components/chat/help-card";
 import { ModelPicker } from "@/components/chat/model-picker";
 import { Button } from "@/components/ui/button";
 import {
@@ -166,6 +167,7 @@ export const ChatBox = ({ userId }: { userId: number }) => {
   );
   const fileRef = useRef<HTMLInputElement>(null);
   const [liveStream, setLiveStream] = useState<PushStream | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
   const streamRef = useRef<PushStream | null>(null);
 
   const queryClient = useQueryClient();
@@ -218,6 +220,14 @@ export const ChatBox = ({ userId }: { userId: number }) => {
   const send = (text: string) => {
     const message = text.trim();
 
+    // A command, not a message: answered here, never sent to the model or stored.
+    if (!image && message.toLowerCase() === "/help") {
+      setDraft("");
+      setShowHelp(true);
+
+      return;
+    }
+
     // An image on its own is a complete message; text on its own is too.
     if ((!message && !image) || isPending) {
       return;
@@ -232,6 +242,7 @@ export const ChatBox = ({ userId }: { userId: number }) => {
     setDraft("");
     setImage(null);
     setErrors([]);
+    setShowHelp(false);
     setActiveTool(null);
 
     mutate(
@@ -300,6 +311,18 @@ export const ChatBox = ({ userId }: { userId: number }) => {
             ),
           )}
 
+          {showHelp ? (
+            <Message className="flex w-full flex-col items-start gap-2">
+              <HelpCard
+                onPick={(example) => {
+                  setDraft(example);
+                  setShowHelp(false);
+                }}
+                onClose={() => setShowHelp(false)}
+              />
+            </Message>
+          ) : null}
+
           {/* While a tool runs, say which one. The shimmer is the only thing moving. */}
           {isPending && activeTool ? (
             <Message className="flex w-full flex-col items-start gap-2">
@@ -351,8 +374,16 @@ export const ChatBox = ({ userId }: { userId: number }) => {
         </div>
       </ChatContainerRoot>
 
-      {isEmpty ? (
+      {isEmpty && !showHelp ? (
         <div className="mx-auto flex w-full max-w-2xl shrink-0 flex-wrap gap-2 px-6 pb-4">
+          <PromptSuggestion
+            size="sm"
+            variant="ghost"
+            className="co-pill-outline px-3.5 text-[0.875rem]"
+            onClick={() => setShowHelp(true)}
+          >
+            what can you do?
+          </PromptSuggestion>
           {SUGGESTIONS.map((suggestion) => (
             <PromptSuggestion
               key={suggestion}
