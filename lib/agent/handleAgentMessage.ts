@@ -73,18 +73,32 @@ const MAX_STEPS = 5;
 const toIsoDate = (date: Date): string => date.toISOString().slice(0, 10);
 
 /**
- * Strips empty emphasis runs like `**   **`, which gpt-oss-120b intermittently emits as
- * a leading artifact. Whitespace-only emphasis carries no meaning, so removing it loses
- * nothing — the reply's actual text is untouched.
+ * Cleans up two artifacts gpt-oss-120b intermittently emits.
+ *
+ * 1. Empty emphasis runs like `**   **`, which carry no meaning.
+ * 2. A degenerate first attempt followed by a blank line and a corrected one — seen on
+ *    non-English input, e.g. `Your expense — ? ? — ? ?\n\nYour expense for coffee has
+ *    been recorded.` The system instruction already asks for one short sentence, so a
+ *    multi-paragraph reply is off-contract and the last paragraph is the real answer.
+ *
+ * Neither rule can touch a well-formed single-sentence reply, which is the whole point:
+ * a heuristic that eats good output would be worse than the occasional odd one.
  */
-const normalizeReply = (reply: string): string =>
-  reply
+const normalizeReply = (reply: string): string => {
+  const cleaned = reply
     // Whitespace between the markers is required: without it the single-character
     // alternative matches the two asterisks of a real `**bold**` run and eats it.
     .replace(/(\*\*|__)\s+\1/g, "")
     .replace(/(?<![*_])([*_])\s+\1(?![*_])/g, "")
-    .replace(/\n{3,}/g, "\n\n")
     .trim();
+
+  const paragraphs = cleaned
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  return (paragraphs.at(-1) ?? cleaned).replace(/\n{2,}/g, "\n").trim();
+};
 
 /** Keeps the upstream message intact rather than flattening it to "something went wrong". */
 const describeError = (error: unknown): string =>
