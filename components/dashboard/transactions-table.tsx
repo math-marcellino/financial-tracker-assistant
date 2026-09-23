@@ -114,6 +114,38 @@ export const TransactionsTable = ({
     [filtered, sortKey, direction],
   );
 
+  // Rows that arrived since the last render of this list, so they can animate in.
+  // Tracked by adjusting state during render (not an effect), so a new row's first
+  // paint already carries the animation instead of flashing in plain first.
+  const [previous, setPrevious] = useState(transactions);
+  const [fresh, setFresh] = useState<ReadonlySet<string>>(() => new Set());
+
+  if (transactions !== previous) {
+    const known = new Set(previous.map((row) => row.id));
+    const added = transactions.filter((row) => !known.has(row.id));
+    // No overlap with the old list means a different list (a month switch), not new
+    // entries in this one — animating every row of it would be noise.
+    const sameList =
+      previous.length === 0 || added.length < transactions.length;
+
+    setPrevious(transactions);
+
+    if (sameList && added.length > 0) {
+      setFresh(
+        (current) => new Set([...current, ...added.map((row) => row.id)]),
+      );
+    }
+  }
+
+  const settle = (id: string) =>
+    setFresh((current) => {
+      const next = new Set(current);
+
+      next.delete(id);
+
+      return next;
+    });
+
   const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   // Clamped at read time, not stored: a delete, a poll or a month switch can shrink the
   // list under the current page, and an effect to fix it up would render a blank page first.
@@ -263,7 +295,13 @@ export const TransactionsTable = ({
               {visible.map((row) => (
                 <tr
                   key={row.id}
-                  className="border-b border-[var(--co-card-border)] last:border-b-0"
+                  // Cleared once played, so paging away and back doesn't replay it.
+                  onAnimationEnd={
+                    fresh.has(row.id) ? () => settle(row.id) : undefined
+                  }
+                  className={`border-b border-[var(--co-card-border)] last:border-b-0 ${
+                    fresh.has(row.id) ? "row-enter" : ""
+                  }`}
                 >
                   <td className="py-3 whitespace-nowrap tabular-nums text-[var(--co-body-muted)]">
                     {row.date}

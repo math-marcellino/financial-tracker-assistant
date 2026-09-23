@@ -215,6 +215,32 @@
   }
 }
 
+/* ---- New transaction row --------------------------------------------- */
+/* Slides in, then holds a soft-stone wash long enough to find it before it fades.
+   Rows only — a background on the <tr> paints across every cell. */
+@keyframes row-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px);
+    background-color: var(--co-soft-stone);
+  }
+  20% {
+    opacity: 1;
+    transform: none;
+    background-color: var(--co-soft-stone);
+  }
+  60% {
+    background-color: var(--co-soft-stone);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.row-enter {
+  animation: row-enter 1.8s ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
