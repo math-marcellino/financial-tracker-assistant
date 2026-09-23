@@ -19,8 +19,9 @@ questions about those records.
 
 ## Why this problem, and how I know it's worth solving
 
-It's actually my own problem. When I don't track my spending, I overspend and can't say where
-the money went. Tracking is the brake, but I'll only stick with it if recording an expense takes almost zero effort
+It's my own problem. When I don't track my spending, I overspend and can't say where
+the money went. I've started and quit every finance app I've tried, always for the same
+reason: logging takes too much effort. If that effort drops to almost zero, I'll keep tracking.
 
 ## What's already out there, and why I built this anyway
 
@@ -31,30 +32,23 @@ have open.
 
 ## What's in scope, what's out, and why
 
-**In:**
-- **Web & Telegram chat:** One shared account across both platforms.
-- **Automatic categorization:** Automatically categorizes plain-text messages.
-- **Receipt scanning:** Recognizes and extracts data from receipt photos.
-- **Record management:** Add, edit, and delete records through chat or the dashboard.
-- **Monthly budgets & pacing:** Tracks daily spend rate and estimates when limits will be reached.
-- **Summaries & charts:** Visual breakdown of where your money went, plus past record summaries.
-- **Help menu:** `/help` command listing everything the assistant can do.
+**In:** Web and Telegram chat on one shared account; logging from text or receipt photos
+with automatic categorization; editing records via chat or the dashboard; monthly
+budgets with pace estimates; charts and spending summaries.
 
 **Out, for now:**
 - **Bank sync:** A heavy security burden, and not the core point of the tool.
-- **Proactive alerts:** Bots can only message users who messaged first; needs opt-in flows.
-- **Currency conversion:** Multi-currency support.
-- **Shared accounts:** Multi-user shared finances.
-- **Recurring transactions:** Automated repeating expenses/incomes.
+- **Proactive alerts:** Bots can only message users who messaged first, so this needs an opt-in flow.
+- **Multi-currency:** Needs exchange rates, and most of my spending is in one currency.
+- **Shared accounts:** Adds permissions and shared ownership of records; the core use is personal.
+- **Recurring transactions:** Useful, but secondary to fast one-off logging. It should wait for user demand.
 
 ## Where I didn't have answers, what I assumed
 
 - **Telegram adoption:** Users already have and actively use Telegram.
-- **Category coverage:** A preset list of categories is enough for most everyday spending.
-- **Single currency:** Most transactions happen in a single, default currency.
-- **Default date:** If a date isn't mentioned, the transaction happened today.
-- **One receipt, one transaction:** Each receipt photo represents a single transaction.
-- **Correct after saving:** Fixing mistakes afterwards (via chat or dashboard) is preferred over adding a friction-heavy confirmation step before saving.
+- **Category coverage:** A preset list of categories covers most everyday spending.
+- **Single currency:** Most transactions happen in one default currency.
+- **Correct after saving:** Fixing a mistake afterwards beats a confirmation step before every save.
 
 ## Three questions I'd ask a real user before building more
 
@@ -65,16 +59,15 @@ have open.
 ## How I'd know it's working, and what I'd do next
 
 It's working if people are still logging after several weeks, if few entries get
-corrected right after they're created, and if most entries take a single message. 
+corrected right after they're created, and if most entries take a single message.
 
-**What I'd do next:**
-- **Pace-based budget alerts (Telegram):** Opt-in alerts when spending hits 80% and 100% of a budget limit. Leveraging the existing pace estimate, it can forecast *when* the limit will be exceeded, not just that it's close (only for users who have started the bot).
-- **Weekly recaps:** Automated spending summaries sent at the end of each week.
-- **Custom categories:** Allowing users to define and customize categories to fit their lifestyle.
-- **Recurring transactions:** Tracking repeating bills and subscriptions, prioritized by user feedback.
+**Next:**
+- **Budget alerts on Telegram:** Opt-in alerts at 80% and 100% of a budget, using the existing pace estimate to forecast when the limit will be hit.
+- **Custom categories:** Let users define categories that fit their lifestyle.
+- **Recurring transactions:** Track bills and subscriptions, if users ask for it.
 
 ## How I used AI
 
-- **In the product:** An LLM with tool calling processes each message, while application code validates all tool arguments before data is saved.
-- **In development:** I used AI from the very beginning—brainstorming ideas, evaluating what was feasible within a short timeframe, and discussing the system design and tech stack. Once finalized, I documented these architectural decisions and conventions in `CLAUDE.md` to keep generated code consistent, using Claude Code to accelerate the entire implementation.
-- **Where it went wrong (and how it was fixed):** The assistant initially classified internal money transfers (such as ATM withdrawals or e-wallet top-ups) as income, artificially inflating earnings. Caught during testing, it now asks for clarification whenever a message might be an internal transfer rather than real income.
+- **In the product:** An LLM with tool calling turns each message into a record. Application code validates every tool argument before anything is saved.
+- **In development:** AI helped me brainstorm, scope what fit the timeframe, and choose the system design and stack. I wrote those decisions into `CLAUDE.md` so the code Claude Code generated stayed consistent.
+- **Where it went wrong:** The assistant logged internal transfers (ATM withdrawals, e-wallet top-ups) as income, which inflated earnings. I caught it in testing; it now asks for clarification when a message might be a transfer.

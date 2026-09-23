@@ -161,10 +161,11 @@ const buildHistory = (): Seed[] => {
 };
 
 const BUDGETS: Array<{ category: ExpenseCategory; limit: number }> = [
-  { category: "food_drink", limit: 1_500_000 },
-  // Deliberately under the seeded groceries spend, so the over-budget state is visible
-  // on a cold dashboard rather than only after someone overspends.
-  { category: "groceries", limit: 1_200_000 },
+  // Sized above a full month of seeded spend (~2.2M each), so these stay under budget
+  // whichever day the script runs. The over-budget state still shows on a cold
+  // dashboard via transport and shopping below.
+  { category: "food_drink", limit: 3_000_000 },
+  { category: "groceries", limit: 2_500_000 },
   { category: "transport", limit: 800_000 },
   { category: "shopping", limit: 1_000_000 },
 ];
