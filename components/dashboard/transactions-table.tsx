@@ -3,6 +3,8 @@
 import {
   ArrowDown,
   ArrowUp,
+  ChevronLeft,
+  ChevronRight,
   Pencil,
   Plus,
   Trash2,
@@ -28,6 +30,8 @@ import { formatAmount, humanizeCategory } from "@/lib/format";
 
 type SortKey = "date" | "amount" | "category";
 type SortDirection = "asc" | "desc";
+
+const PAGE_SIZE = 20;
 
 /** Closed, adding a new row, or editing an existing one. */
 type FormTarget =
@@ -64,8 +68,16 @@ export const TransactionsTable = ({
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [direction, setDirection] = useState<SortDirection>("desc");
   const [filters, setFilters] = useState<TableFilters>(EMPTY_FILTERS);
+  const [page, setPage] = useState(0);
   const [formTarget, setFormTarget] = useState<FormTarget>({ open: false });
   const [deleting, setDeleting] = useState<DashboardTransaction | null>(null);
+
+  // Any change to what's in the list starts over from its first page; a page number
+  // carried across a new filter points at rows the user never asked for.
+  const updateFilters = (next: TableFilters) => {
+    setFilters(next);
+    setPage(0);
+  };
 
   const filtered = useMemo(
     () => applyFilters(transactions, filters),
@@ -78,7 +90,16 @@ export const TransactionsTable = ({
     return direction === "asc" ? rows : rows.reverse();
   }, [filtered, sortKey, direction]);
 
+  const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  // Clamped at read time, not stored: a delete, a poll or a month switch can shrink the
+  // list under the current page, and an effect to fix it up would render a blank page first.
+  const currentPage = Math.min(page, pageCount - 1);
+  const firstIndex = currentPage * PAGE_SIZE;
+  const visible = sorted.slice(firstIndex, firstIndex + PAGE_SIZE);
+
   const toggle = (key: SortKey) => {
+    setPage(0);
+
     if (key === sortKey) {
       setDirection((current) => (current === "asc" ? "desc" : "asc"));
       return;
@@ -171,7 +192,7 @@ export const TransactionsTable = ({
           <TransactionFilters
             rows={transactions}
             filters={filters}
-            onChange={setFilters}
+            onChange={updateFilters}
           />
           {addButton}
         </div>
@@ -215,7 +236,7 @@ export const TransactionsTable = ({
               </tr>
             </thead>
             <tbody>
-              {sorted.map((row) => (
+              {visible.map((row) => (
                 <tr
                   key={row.id}
                   className="border-b border-[var(--co-card-border)] last:border-b-0"
@@ -262,6 +283,40 @@ export const TransactionsTable = ({
             </tbody>
           </table>
 
+          {pageCount > 1 ? (
+            <nav
+              aria-label="Transactions pages"
+              className="flex items-center justify-between gap-3 border-t border-[var(--co-hairline)] pt-3 text-[0.8125rem] text-[var(--co-muted)]"
+            >
+              <span className="font-mono tabular-nums">
+                {firstIndex + 1}–{firstIndex + visible.length} of{" "}
+                {sorted.length}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage(currentPage - 1)}
+                  disabled={currentPage === 0}
+                  aria-label="Previous page"
+                  className="co-pill-outline flex items-center p-1.5 disabled:opacity-40"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+                <span className="font-mono tabular-nums">
+                  Page {currentPage + 1} of {pageCount}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage(currentPage + 1)}
+                  disabled={currentPage === pageCount - 1}
+                  aria-label="Next page"
+                  className="co-pill-outline flex items-center p-1.5 disabled:opacity-40"
+                >
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            </nav>
+          ) : null}
         </div>
       )}
 
