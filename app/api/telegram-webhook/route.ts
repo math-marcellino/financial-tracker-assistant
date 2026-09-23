@@ -1,6 +1,10 @@
 import { Bot, webhookCallback, type Context } from "grammy";
+import { after } from "next/server";
 
-import { handleAgentMessage } from "@/lib/agent/handleAgentMessage";
+import {
+  handleAgentMessage,
+  type AgentResult,
+} from "@/lib/agent/handleAgentMessage";
 import { appBaseUrl, createLoginToken } from "@/lib/auth/login-token";
 import type { Transaction } from "@/lib/db/schema";
 import { ensureUser, findUser } from "@/lib/db/users";
@@ -15,6 +19,16 @@ import { verifyWebhookSecret } from "@/lib/telegram/verify";
  */
 
 export const dynamic = "force-dynamic";
+
+/**
+ * A receipt is a photo download plus a vision-model call, which regularly outlasts
+ * grammY's default 10s per-update budget. The work runs in `after()`, so this is the
+ * ceiling for the whole update, not for Telegram's HTTP wait.
+ */
+export const maxDuration = 60;
+
+/** Leaves headroom under maxDuration for the reply itself to go out. */
+const UPDATE_TIMEOUT_MS = 55_000;
 
 /**
  * Replies are stored with markdown because the web chat renders it. Telegram does not:
@@ -102,6 +116,73 @@ const toTelegramHtml = (text: string): string =>
     // [\s\S] rather than the `s` flag: tsconfig targets ES2017, which predates it.
     .replace(/\*\*([\s\S]+?)\*\*/g, "<b>$1</b>")
     .replace(/__([\s\S]+?)__/g, "<b>$1</b>");
+
+/**
+ * Telegram's "typing…" lasts about five seconds, so it is re-sent until the work is
+ * done. Without it a receipt that takes twenty seconds looks like the bot ignored it.
+ */
+const withTyping = async <T>(ctx: Context, work: () => Promise<T>): Promise<T> => {
+  const sendTyping = () =>
+    ctx.replyWithChatAction("typing").catch((error: unknown) => {
+      // Cosmetic: a failed indicator must not fail the reply it decorates.
+      console.error("telegram typing indicator failed", error);
+    });
+
+  void sendTyping();
+  const interval = setInterval(() => void sendTyping(), 4_000);
+
+  try {
+    return await work();
+  } finally {
+    clearInterval(interval);
+  }
+};
+
+/**
+ * Sends the agent's answer. With `statusMessageId` it replaces the "Reading your
+ * receipt…" message in place, so the chat ends with one message rather than a stale
+ * status line above the answer.
+ *
+ * Order matters: the model's text is escaped and converted first, and the card's own
+ * tags are appended after — running the escaper over the card would turn its
+ * <blockquote> into visible &lt;blockquote&gt;.
+ */
+const deliver = async (
+  ctx: Context,
+  result: AgentResult,
+  statusMessageId?: number,
+): Promise<void> => {
+  const body = result.ok ? result.reply : result.error;
+  const html =
+    toTelegramHtml(body) +
+    (result.ok ? transactionCard(result.transaction) : "");
+
+  const send = (text: string, parseMode?: "HTML") =>
+    statusMessageId !== undefined && ctx.chat
+      ? ctx.api.editMessageText(ctx.chat.id, statusMessageId, text, {
+          parse_mode: parseMode,
+        })
+      : ctx.reply(text, { parse_mode: parseMode });
+
+  try {
+    await send(html, "HTML");
+
+    return;
+  } catch (error) {
+    // Malformed markup fails the send outright, which is worse than ugly asterisks.
+    // The formatting bug is logged, not hidden.
+    console.error("telegram HTML reply rejected, sending plain text", error);
+  }
+
+  try {
+    await send(body);
+  } catch (error) {
+    // The edit itself failed (the status message was deleted, say). The answer still
+    // has to arrive, so it goes out as a fresh message.
+    console.error("telegram status edit failed, replying instead", error);
+    await ctx.reply(body);
+  }
+};
 
 let cached: {
   bot: Bot;
@@ -192,54 +273,59 @@ const getHandler = () => {
       return;
     }
 
-    let dataUrl: string;
+    // Sent before anything slow, so the user knows the photo arrived and is being
+    // worked on. It is edited into the answer once there is one.
+    const status = await ctx.reply("🧾 Reading your receipt…");
 
-    try {
-      const file = await ctx.api.getFile(largest.file_id);
+    await withTyping(ctx, async () => {
+      let dataUrl: string;
 
-      if (!file.file_path) {
-        throw new Error("Telegram returned no file path.");
+      try {
+        const file = await ctx.api.getFile(largest.file_id);
+
+        if (!file.file_path) {
+          throw new Error("Telegram returned no file path.");
+        }
+
+        const response = await fetch(
+          `https://api.telegram.org/file/bot${token}/${file.file_path}`,
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Telegram file download failed (${response.status}).`,
+          );
+        }
+
+        const bytes = Buffer.from(await response.arrayBuffer());
+
+        dataUrl = `data:image/jpeg;base64,${bytes.toString("base64")}`;
+      } catch (error) {
+        // Surfaced: a silent failure here looks like the bot ignored the photo.
+        console.error("could not fetch telegram photo", error);
+        await deliver(
+          ctx,
+          {
+            ok: false,
+            error: "I could not download that photo. Try sending it again.",
+          },
+          status.message_id,
+        );
+
+        return;
       }
 
-      const response = await fetch(
-        `https://api.telegram.org/file/bot${token}/${file.file_path}`,
-      );
+      const result = await handleAgentMessage({
+        userId: sender.id,
+        message:
+          ctx.message.caption ??
+          "Here is a receipt — log it as a single transaction.",
+        image: { dataUrl },
+        source: "telegram",
+      });
 
-      if (!response.ok) {
-        throw new Error(`Telegram file download failed (${response.status}).`);
-      }
-
-      const bytes = Buffer.from(await response.arrayBuffer());
-
-      dataUrl = `data:image/jpeg;base64,${bytes.toString("base64")}`;
-    } catch (error) {
-      // Surfaced: a silent failure here looks like the bot ignored the photo.
-      console.error("could not fetch telegram photo", error);
-      await ctx.reply("I could not download that photo. Try sending it again.");
-
-      return;
-    }
-
-    const result = await handleAgentMessage({
-      userId: sender.id,
-      message:
-        ctx.message.caption ??
-        "Here is a receipt — log it as a single transaction.",
-      image: { dataUrl },
-      source: "telegram",
+      await deliver(ctx, result, status.message_id);
     });
-
-    const body = result.ok ? result.reply : result.error;
-    const html =
-      toTelegramHtml(body) +
-      (result.ok ? transactionCard(result.transaction) : "");
-
-    try {
-      await ctx.reply(html, { parse_mode: "HTML" });
-    } catch (error) {
-      console.error("telegram HTML reply rejected, sending plain text", error);
-      await ctx.reply(body);
-    }
   });
 
   bot.on("message:text", async (ctx) => {
@@ -249,33 +335,23 @@ const getHandler = () => {
       return;
     }
 
-    const result = await handleAgentMessage({
-      userId: sender.id,
-      message: ctx.message.text,
-      source: "telegram",
+    await withTyping(ctx, async () => {
+      const result = await handleAgentMessage({
+        userId: sender.id,
+        message: ctx.message.text,
+        source: "telegram",
+      });
+
+      await deliver(ctx, result);
     });
-
-    const body = result.ok ? result.reply : result.error;
-
-    // Order matters: the model's text is escaped and converted first, and the card's
-    // own tags are appended after — running the escaper over the card would turn its
-    // <blockquote> into visible &lt;blockquote&gt;.
-    const html =
-      toTelegramHtml(body) +
-      (result.ok ? transactionCard(result.transaction) : "");
-
-    try {
-      await ctx.reply(html, { parse_mode: "HTML" });
-    } catch (error) {
-      // Malformed markup fails the send outright, which is worse than ugly asterisks.
-      // The plain send still delivers the answer; the formatting bug is logged, not hidden.
-      console.error("telegram HTML reply rejected, sending plain text", error);
-
-      await ctx.reply(body);
-    }
   });
 
-  cached = { bot, handle: webhookCallback(bot, "std/http") };
+  cached = {
+    bot,
+    handle: webhookCallback(bot, "std/http", {
+      timeoutMilliseconds: UPDATE_TIMEOUT_MS,
+    }),
+  };
 
   return cached;
 };
@@ -298,13 +374,23 @@ export const POST = async (request: Request): Promise<Response> => {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  try {
-    return await getHandler().handle(request);
-  } catch (error) {
-    // Telegram redelivers on a non-2xx, and a redelivery loop would re-run the agent on
-    // every retry. Log it and acknowledge.
-    console.error("telegram-webhook failed", error);
+  // Acknowledge first, work after. Telegram only needs to know the update arrived;
+  // holding its request open for a twenty-second receipt is what used to time out and
+  // drop the reply. The body is read now, because the request is gone once we respond.
+  const body = await request.text();
+  const headers = new Headers(request.headers);
+  const url = request.url;
 
-    return new Response("ok", { status: 200 });
-  }
+  after(async () => {
+    try {
+      await getHandler().handle(
+        new Request(url, { method: "POST", headers, body }),
+      );
+    } catch (error) {
+      // Telegram has already had its 200, so nothing redelivers. Logged, not hidden.
+      console.error("telegram-webhook failed", error);
+    }
+  });
+
+  return new Response("ok", { status: 200 });
 };
