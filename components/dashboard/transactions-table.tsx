@@ -114,13 +114,12 @@ export const TransactionsTable = ({
     // Container query, not a viewport one: this table lives in a column whose width
     // is set by the layout, so the breakpoint has to track the column, not the window.
     <div className="@container flex w-full flex-col gap-4">
-      <TransactionFilters
-        rows={transactions}
-        filters={filters}
-        onChange={setFilters}
-      />
-
-      <div className="flex items-baseline justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <TransactionFilters
+          rows={transactions}
+          filters={filters}
+          onChange={setFilters}
+        />
         <p className="text-[0.8125rem] text-[var(--co-muted)]">
           {sorted.length === transactions.length
             ? `${transactions.length} transactions`

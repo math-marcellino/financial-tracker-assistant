@@ -10,7 +10,11 @@ import {
 import { MonthSelector } from "@/components/dashboard/month-selector";
 import { TransactionsTable } from "@/components/dashboard/transactions-table";
 import { TextShimmer } from "@/components/ui/text-shimmer";
-import { useBudgets, useMonths, useTransactions } from "@/hooks/use-transactions";
+import {
+  useBudgets,
+  useMonths,
+  useTransactions,
+} from "@/hooks/use-transactions";
 
 const Section = ({
   title,
