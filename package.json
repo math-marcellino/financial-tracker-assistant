@@ -12,7 +12,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "seed:demo": "tsx scripts/seed-demo.ts"
+    "seed:demo": "tsx scripts/seed-demo.ts",
+    "telegram:commands": "tsx scripts/set-telegram-commands.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
