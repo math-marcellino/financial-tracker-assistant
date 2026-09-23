@@ -5,6 +5,7 @@ import {
   check,
   date,
   index,
+  integer,
   jsonb,
   numeric,
   pgEnum,
@@ -62,6 +63,14 @@ export const users = pgTable("users", {
   // Null means "use the app default". Validated against Groq's live model list on
   // every request, so a stale or tampered value can never reach the API.
   preferredModel: text("preferred_model"),
+  /**
+   * Bumped to invalidate every session cookie for this account at once.
+   *
+   * Telegram's Login Widget is a one-shot identity assertion with no way to ask
+   * whether a user has since revoked the app, so revocation can only be enforced from
+   * our side. This is that lever.
+   */
+  sessionEpoch: integer("session_epoch").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

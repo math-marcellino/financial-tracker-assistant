@@ -22,14 +22,14 @@ export const AccountMenu = ({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const signOut = async () => {
+  const post = async (path: string, label: string) => {
     setPending(true);
     setError(null);
 
-    const response = await fetch("/api/auth/logout", { method: "POST" });
+    const response = await fetch(path, { method: "POST" });
 
     if (!response.ok) {
-      setError(`Sign out failed (${response.status}).`);
+      setError(`${label} failed (${response.status}).`);
       setPending(false);
       return;
     }
@@ -38,6 +38,16 @@ export const AccountMenu = ({
     // re-run against the now-cleared cookie so the login panel takes over.
     router.refresh();
   };
+
+  const signOut = () => post("/api/auth/logout", "Sign out");
+
+  /**
+   * Revoking inside Telegram does not reach this app — the Login Widget gives no
+   * revocation channel — so this is the only way to kill a session on a device you no
+   * longer have.
+   */
+  const signOutEverywhere = () =>
+    post("/api/auth/revoke", "Sign out everywhere");
 
   if (via === "dev") {
     return (
@@ -63,6 +73,15 @@ export const AccountMenu = ({
       >
         <LogOut size={13} />
         {pending ? "Signing out…" : "Sign out"}
+      </button>
+      <button
+        type="button"
+        onClick={signOutEverywhere}
+        disabled={pending}
+        title="Invalidates this account's sessions on every device. Revoking access inside Telegram does not do this."
+        className="text-[0.8125rem] text-[var(--co-body-muted)] underline-offset-4 transition-colors hover:text-[var(--co-ink)] hover:underline disabled:opacity-50"
+      >
+        everywhere
       </button>
       {error ? (
         <span className="text-[0.75rem] text-[var(--co-error)]">{error}</span>

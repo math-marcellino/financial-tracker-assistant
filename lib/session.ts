@@ -1,5 +1,9 @@
+import { eq, sql } from "drizzle-orm";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
+
+import { getDb } from "@/lib/db";
+import { users } from "@/lib/db/schema";
 
 /**
  * A signed, HttpOnly session cookie. The payload is readable but not forgeable: the
@@ -9,7 +13,14 @@ import { cookies } from "next/headers";
 const COOKIE_NAME = "ft_session";
 const MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
-type SessionPayload = { uid: number; iat: number };
+/**
+ * `epoch` is what makes a session revocable. Telegram's Login Widget is a one-shot
+ * identity assertion — there is no endpoint to ask whether a user has since revoked
+ * the app — so a cookie that only proves "Telegram vouched for this id once" would
+ * stay valid until it expired. Bumping users.session_epoch invalidates every cookie
+ * for that account on the next request.
+ */
+type SessionPayload = { uid: number; iat: number; epoch: number };
 
 const getSecret = (): string => {
   const secret = process.env.SESSION_SECRET;
@@ -37,9 +48,15 @@ const safeEqual = (a: string, b: string): boolean => {
 };
 
 export const createSessionCookie = async (userId: number): Promise<void> => {
+  const [user] = await getDb()
+    .select({ epoch: users.sessionEpoch })
+    .from(users)
+    .where(eq(users.telegramId, userId));
+
   const payload: SessionPayload = {
     uid: userId,
     iat: Math.floor(Date.now() / 1000),
+    epoch: user?.epoch ?? 0,
   };
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
 
@@ -85,8 +102,32 @@ export const readSession = async (): Promise<number | null> => {
       return null;
     }
 
+    // The signature proves the cookie is ours, not that it is still wanted. A stale
+    // epoch means the account has signed out everywhere since this cookie was issued.
+    const [user] = await getDb()
+      .select({ epoch: users.sessionEpoch })
+      .from(users)
+      .where(eq(users.telegramId, payload.uid));
+
+    if (!user || user.epoch !== (payload.epoch ?? 0)) {
+      return null;
+    }
+
     return payload.uid;
   } catch {
     return null;
   }
+};
+
+/**
+ * Invalidates every session cookie for this account, on every device, immediately.
+ * The user's own cookie is cleared too, so the caller does not need to.
+ */
+export const revokeAllSessions = async (userId: number): Promise<void> => {
+  await getDb()
+    .update(users)
+    .set({ sessionEpoch: sql`${users.sessionEpoch} + 1` })
+    .where(eq(users.telegramId, userId));
+
+  await clearSessionCookie();
 };
