@@ -56,12 +56,12 @@ const transactionCard = (transaction: Transaction | null): string => {
 };
 
 /**
- * The bot serves registered users only: a Telegram id proves *who* somebody is, never
- * that they are entitled to an account here. Signing up happens on the web, so an
- * unknown sender is told where to go and nothing else runs.
+ * Guards the paths that cost something. A Telegram id proves *who* somebody is, never
+ * that they have an account here — and an account is what the LLM call is spent on.
  *
- * One indexed read, and no writes — an unknown sender must not create a row, reach
- * Groq, or cost anything beyond this lookup.
+ * `/login` is deliberately exempt: it is the signup route, it costs one row, and it
+ * never reaches the LLM. Everything else requires an existing account, so an unknown
+ * sender gets a pointer and nothing runs beyond this one indexed read.
  */
 const requireRegistered = async (
   ctx: Context,
@@ -76,7 +76,7 @@ const requireRegistered = async (
 
   if (!user) {
     await ctx.reply(
-      `You'll need an account before I can help.\n\nSign in with Telegram at ${appBaseUrl()} and then come back — I'll pick up where you left off.`,
+      `You'll need an account before I can help.\n\nSend /login and I'll send you a sign-in link — or sign in with Telegram at ${appBaseUrl()}.`,
       { link_preview_options: { is_disabled: true } },
     );
 
@@ -127,16 +127,27 @@ const getHandler = () => {
    * chat is as trustworthy as the widget's hash — and it has no phone-number step,
    * no popup and no third-party cookie to be blocked.
    */
+  /**
+   * Deliberately open, unlike every other handler: this *is* the signup route.
+   *
+   * Gating it would mean the only way to register is the Login Widget, whose
+   * phone-number step fails silently in some browsers — a user it fails for would have
+   * no way in at all. This path costs one row and a token, and never reaches the LLM,
+   * so opening it does not open the expensive surface.
+   */
   bot.command("login", async (ctx) => {
-    // Gated like everything else: an open /login would be an unauthenticated signup
-    // route, which is exactly what registration-only is meant to prevent.
-    const sender = await requireRegistered(ctx);
+    const from = ctx.from;
 
-    if (!sender) {
+    if (!from) {
       return;
     }
 
-    const token = await createLoginToken(sender.id);
+    await ensureUser(from.id, {
+      username: from.username ?? null,
+      firstName: from.first_name ?? null,
+    });
+
+    const token = await createLoginToken(from.id);
 
     await ctx.reply(
       `Tap to sign in:\n${appBaseUrl()}/login?token=${token}\n\nThe link works once and expires in 10 minutes.`,
