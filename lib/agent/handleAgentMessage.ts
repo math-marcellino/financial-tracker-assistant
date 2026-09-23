@@ -129,6 +129,11 @@ const buildSystemInstruction = (defaultCurrency: string, now: Date): string =>
     "Moving money between the user's own accounts is NOT income and NOT an expense. Withdrawing cash, topping up an e-wallet, transferring to savings, paying off a credit card, or cashing out — none of these change what the user is worth, so do not record them.",
     "If a message could be either a transfer or real income, do not guess and do not call a tool. Reply with one short question asking which it was.",
     "If the user asks for something no tool covers, answer in plain text. Never force an unrelated tool call.",
+    // History is replayed as plain text with no tool traffic, so the model cannot see
+    // which earlier turns actually wrote a row. Left to itself it "catches up" on
+    // them, logging the same purchase a second time.
+    "Earlier messages in this conversation have already been handled. Act ONLY on the latest user message. Never add, edit or delete a transaction because of something said in an earlier message, even if it looks like it was never recorded.",
+    "Never say a transaction was recorded, updated or deleted unless you called the tool for it in this turn and it succeeded.",
     // The image is read once and discarded, so nothing downstream can re-check it.
     "When given a photo of a receipt, bill or invoice: read the FINAL total the customer paid, including tax and service charge, and log it as ONE transaction. Do not log a row per line item.",
     "Put the merchant name in the note. Use the date printed on the receipt; if there is none, use today.",
