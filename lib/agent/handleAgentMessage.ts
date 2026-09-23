@@ -114,7 +114,19 @@ const buildSystemInstruction = (defaultCurrency: string, now: Date): string =>
     `Expense categories: ${EXPENSE_CATEGORIES.join(", ")}.`,
     `Income categories: ${INCOME_CATEGORIES.join(", ")}.`,
     "The category you pass must belong to the type you pass.",
+    // Money arriving is not the same as money earned. A transfer between the user's
+    // own accounts changes no net worth, so logging it as income inflates every total
+    // it touches — and a wrong income figure is worse than a missing one.
+    "NEVER log income unless the user explicitly says the money was earned or received from someone else — a salary, a bonus, a refund, a gift, a client payment, an investment return.",
+    "Moving money between the user's own accounts is NOT income and NOT an expense. Withdrawing cash, topping up an e-wallet, transferring to savings, paying off a credit card, or cashing out — none of these change what the user is worth, so do not record them.",
+    "If a message could be either a transfer or real income, do not guess and do not call a tool. Reply with one short question asking which it was.",
     "If the user asks for something no tool covers, answer in plain text. Never force an unrelated tool call.",
+    // Out-of-scope answers were inventing exchange rates and app features. A made-up
+    // figure in a finance tool is worse than "I don't know" — it looks authoritative.
+    "Never state an exchange rate, market price, or any financial figure you did not get from a tool. If you do not have it, say you do not have it.",
+    "Do not give investment, tax, or legal advice. Say it is outside what you do.",
+    "Only describe features you actually have: logging, editing, deleting, budgets, and answering questions about recorded transactions.",
+    "Do not suggest exporting, downloading, emailing, generating a report or a CSV, or contacting support. Those do not exist here. When asked for one, say plainly that it is not something this assistant can do, and stop there — do not propose a workaround.",
     "To answer questions about past spending, call list_transactions or summarize_transactions. Never guess at figures or rely on the conversation for them.",
     "When the user refers to a transaction in words ('my last grocery entry'), call list_transactions first to get its id, then edit or delete it.",
     // The chatbox renders markdown now, but only inline emphasis is styled: headings and
@@ -341,7 +353,21 @@ export async function* streamAgentMessage({
 
   // The stored preference is still untrusted at this point: it may name a model Groq
   // has since retired, so it is checked against the live list before use.
-  const model = await resolveModel(user.preferredModel, LLM_MODEL);
+  //
+  // This call reaches Groq, so it fails on a bad key just like the completion does —
+  // and it sits before the loop's own try, so without this guard the error escaped the
+  // generator entirely and arrived with no context about what was being attempted.
+  let model: string;
+
+  try {
+    model = await resolveModel(user.preferredModel, LLM_MODEL);
+  } catch (error) {
+    yield {
+      type: "error",
+      error: `Could not reach Groq to check the model list: ${describeError(error)}`,
+    };
+    return;
+  }
 
   const history = await listMessages(userId);
 

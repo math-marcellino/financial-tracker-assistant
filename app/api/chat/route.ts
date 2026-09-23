@@ -32,7 +32,10 @@ export const POST = async (request: Request): Promise<Response> => {
     return Response.json({ ok: false, error: identity.error }, { status: 500 });
   }
 
-  const parsed = v.safeParse(BodySchema, await request.json());
+  // A malformed body throws here, not in safeParse — without the catch it escapes as a
+  // bare 500 with no body, which is the one failure mode that looks like nothing happened.
+  const body: unknown = await request.json().catch(() => null);
+  const parsed = v.safeParse(BodySchema, body);
 
   if (!parsed.success) {
     return Response.json(
