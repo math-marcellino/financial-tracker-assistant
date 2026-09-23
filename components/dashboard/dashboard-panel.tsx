@@ -82,7 +82,11 @@ export const DashboardPanel = ({ userId }: { userId: number }) => {
       </Section>
 
       <Section title="Budgets">
-        <BudgetProgressList budgets={budgets.data ?? []} />
+        <BudgetProgressList
+          userId={userId}
+          budgets={budgets.data ?? []}
+          month={month}
+        />
       </Section>
 
       <Section title="Transactions">
