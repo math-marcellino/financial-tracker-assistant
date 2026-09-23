@@ -71,17 +71,6 @@ export default async function DashboardPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <header className="mx-auto flex w-full max-w-6xl shrink-0 flex-col gap-2 px-6 pt-8 pb-5">
-        {/* section-heading: never bold — size and spacing do the hierarchy work
-            (DESIGN.md § Typography Principles). */}
-        <h1 className="text-[2.25rem] leading-[1.1] font-normal tracking-[-0.48px] text-[var(--co-ink)]">
-          Money, in plain language
-        </h1>
-        <p className="text-[1.0625rem] leading-[1.4] text-[var(--co-body-muted)]">
-          Tell it what you spent. Ask it what you&rsquo;ve spent.
-        </p>
-      </header>
-
       <HydrationBoundary state={dehydrate(queryClient)}>
         <Workspace userId={identity.userId} />
       </HydrationBoundary>

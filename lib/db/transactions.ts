@@ -100,9 +100,30 @@ export const summarizeTransactionsFor = async (
   }));
 };
 
-/** The dashboard's feed. Newest first, scoped to the user in SQL. */
-export const listRecentForUser = async (userId: number, limit = 200) =>
-  getDb()
+/**
+ * The dashboard's feed. Newest first, scoped to the user in SQL.
+ *
+ * The month filter is applied in SQL rather than on the client: the result set is
+ * capped, so filtering after the fact would silently show an empty month once the
+ * user has more transactions than the cap.
+ */
+export const listRecentForUser = async (
+  userId: number,
+  options: { month?: string | null; limit?: number } = {},
+) => {
+  const { month, limit = 200 } = options;
+
+  const filters: SQL[] = [eq(transactions.userId, userId)];
+
+  if (month) {
+    // `month` is YYYY-MM; the range is half-open so it needs no end-of-month maths.
+    filters.push(
+      sql`${transactions.date} >= ${`${month}-01`}::date
+          AND ${transactions.date} < (${`${month}-01`}::date + interval '1 month')`,
+    );
+  }
+
+  return getDb()
     .select({
       id: transactions.id,
       amount: transactions.amount,
@@ -115,9 +136,24 @@ export const listRecentForUser = async (userId: number, limit = 200) =>
       createdAt: transactions.createdAt,
     })
     .from(transactions)
-    .where(eq(transactions.userId, userId))
+    .where(and(...filters))
     .orderBy(desc(transactions.date), desc(transactions.createdAt))
     .limit(limit);
+};
+
+/** Months that actually have rows, newest first — the selector never offers an empty one. */
+export const listTransactionMonths = async (
+  userId: number,
+): Promise<string[]> => {
+  const rows = await getDb()
+    .select({ month: sql<string>`to_char(${transactions.date}, 'YYYY-MM')` })
+    .from(transactions)
+    .where(eq(transactions.userId, userId))
+    .groupBy(sql`to_char(${transactions.date}, 'YYYY-MM')`)
+    .orderBy(sql`to_char(${transactions.date}, 'YYYY-MM') desc`);
+
+  return rows.map((row) => row.month);
+};
 
 export type DashboardTransaction = Awaited<
   ReturnType<typeof listRecentForUser>
@@ -139,7 +175,14 @@ export type BudgetProgress = {
  */
 export const listBudgetsWithSpend = async (
   userId: number,
+  month?: string | null,
 ): Promise<BudgetProgress[]> => {
+  const filters: SQL[] = [eq(budgets.userId, userId)];
+
+  if (month) {
+    filters.push(sql`to_char(${budgets.month}, 'YYYY-MM') = ${month}`);
+  }
+
   const rows = await getDb()
     .select({
       id: budgets.id,
@@ -157,7 +200,7 @@ export const listBudgetsWithSpend = async (
       ), 0)::text`,
     })
     .from(budgets)
-    .where(eq(budgets.userId, userId))
+    .where(and(...filters))
     .orderBy(desc(budgets.month), budgets.category);
 
   return rows.map((row) => ({

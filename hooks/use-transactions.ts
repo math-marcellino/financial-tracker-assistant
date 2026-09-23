@@ -5,7 +5,9 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import {
   budgetsQueryKey,
   fetchBudgets,
+  fetchMonths,
   fetchTransactions,
+  monthsQueryKey,
   transactionsQueryKey,
 } from "@/lib/api/transactions";
 import type {
@@ -25,18 +27,31 @@ const POLL = {
 
 export const useTransactions = (
   userId: number,
+  month?: string | null,
 ): UseQueryResult<DashboardTransaction[], Error> =>
   useQuery({
-    queryKey: transactionsQueryKey(userId),
-    queryFn: fetchTransactions,
+    queryKey: transactionsQueryKey(userId, month),
+    queryFn: () => fetchTransactions(month),
+    // Keeps the previous month's rows on screen while the new month loads, so
+    // switching months doesn't flash an empty table.
+    placeholderData: (previous) => previous,
     ...POLL,
   });
 
 export const useBudgets = (
   userId: number,
+  month?: string | null,
 ): UseQueryResult<BudgetProgress[], Error> =>
   useQuery({
-    queryKey: budgetsQueryKey(userId),
-    queryFn: fetchBudgets,
+    queryKey: budgetsQueryKey(userId, month),
+    queryFn: () => fetchBudgets(month),
+    placeholderData: (previous) => previous,
+    ...POLL,
+  });
+
+export const useMonths = (userId: number): UseQueryResult<string[], Error> =>
+  useQuery({
+    queryKey: monthsQueryKey(userId),
+    queryFn: fetchMonths,
     ...POLL,
   });
