@@ -86,7 +86,7 @@ export const DashboardPanel = ({ userId }: { userId: number }) => {
       </Section>
 
       <Section title="Transactions">
-        <TransactionsTable transactions={rows} />
+        <TransactionsTable userId={userId} transactions={rows} />
       </Section>
     </div>
   );

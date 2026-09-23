@@ -1,8 +1,16 @@
 "use client";
 
-import { ArrowDown, ArrowUp } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { DeleteTransactionDialog } from "@/components/dashboard/delete-transaction-dialog";
+import { TransactionFormDialog } from "@/components/dashboard/transaction-form-dialog";
 import {
   EMPTY_FILTERS,
   TransactionFilters,
@@ -20,6 +28,11 @@ import { formatAmount, humanizeCategory } from "@/lib/format";
 
 type SortKey = "date" | "amount" | "category";
 type SortDirection = "asc" | "desc";
+
+/** Closed, adding a new row, or editing an existing one. */
+type FormTarget =
+  | { open: false }
+  | { open: true; transaction: DashboardTransaction | null };
 
 const compare = (
   a: DashboardTransaction,
@@ -42,13 +55,17 @@ const compare = (
 };
 
 export const TransactionsTable = ({
+  userId,
   transactions,
 }: {
+  userId: number;
   transactions: DashboardTransaction[];
 }) => {
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [direction, setDirection] = useState<SortDirection>("desc");
   const [filters, setFilters] = useState<TableFilters>(EMPTY_FILTERS);
+  const [formTarget, setFormTarget] = useState<FormTarget>({ open: false });
+  const [deleting, setDeleting] = useState<DashboardTransaction | null>(null);
 
   const filtered = useMemo(
     () => applyFilters(transactions, filters),
@@ -101,12 +118,47 @@ export const TransactionsTable = ({
     </th>
   );
 
+  const addButton = (
+    <button
+      type="button"
+      onClick={() => setFormTarget({ open: true, transaction: null })}
+      className="co-pill flex items-center gap-1.5 px-3.5 py-1.5 text-[0.8125rem]"
+    >
+      <Plus size={14} />
+      Add
+    </button>
+  );
+
+  const dialogs = (
+    <>
+      <TransactionFormDialog
+        userId={userId}
+        open={formTarget.open}
+        transaction={formTarget.open ? formTarget.transaction : null}
+        onOpenChange={(open) => {
+          if (!open) setFormTarget({ open: false });
+        }}
+      />
+      <DeleteTransactionDialog
+        userId={userId}
+        transaction={deleting}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null);
+        }}
+      />
+    </>
+  );
+
   if (transactions.length === 0) {
     return (
-      <p className="py-6 text-base text-[var(--co-body-muted)]">
-        Nothing logged yet. Tell the assistant what you spent and it will show
-        up here.
-      </p>
+      <div className="flex flex-col items-start gap-3 py-6">
+        <p className="text-base text-[var(--co-body-muted)]">
+          Nothing logged yet. Tell the assistant what you spent, or add it by
+          hand.
+        </p>
+        {addButton}
+        {dialogs}
+      </div>
     );
   }
 
@@ -115,11 +167,14 @@ export const TransactionsTable = ({
     // is set by the layout, so the breakpoint has to track the column, not the window.
     <div className="@container flex w-full flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <TransactionFilters
-          rows={transactions}
-          filters={filters}
-          onChange={setFilters}
-        />
+        <div className="flex items-center gap-2">
+          <TransactionFilters
+            rows={transactions}
+            filters={filters}
+            onChange={setFilters}
+          />
+          {addButton}
+        </div>
         <p className="text-[0.8125rem] text-[var(--co-muted)]">
           {sorted.length === transactions.length
             ? `${transactions.length} transactions`
@@ -154,6 +209,9 @@ export const TransactionsTable = ({
                   </span>
                 </th>
                 {header("amount", "Amount", "text-right")}
+                <th scope="col" className="w-18 py-2">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -171,18 +229,43 @@ export const TransactionsTable = ({
                     </span>
                   </td>
                   <td className="hidden truncate py-3 pr-4 font-sans text-[0.9375rem] text-[var(--co-body-muted)] @md:table-cell">
-                    {row.note ?? "—"}
+                    {row.note || "—"}
                   </td>
                   <td className="py-3 text-right whitespace-nowrap tabular-nums">
                     {row.type === "expense" ? "−" : "+"}
                     {formatAmount(row.amount, row.currency)}
                   </td>
+                  <td className="py-3 pl-2">
+                    <div className="flex justify-end gap-0.5">
+                      <button
+                        type="button"
+                        aria-label={`Edit ${humanizeCategory(categoryOf(row))} on ${row.date}`}
+                        onClick={() =>
+                          setFormTarget({ open: true, transaction: row })
+                        }
+                        className="rounded-full p-1.5 text-[var(--co-muted)] transition-colors hover:text-[var(--co-ink)]"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Delete ${humanizeCategory(categoryOf(row))} on ${row.date}`}
+                        onClick={() => setDeleting(row)}
+                        className="rounded-full p-1.5 text-[var(--co-muted)] transition-colors hover:text-[var(--co-error)]"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+
         </div>
       )}
+
+      {dialogs}
     </div>
   );
 };
