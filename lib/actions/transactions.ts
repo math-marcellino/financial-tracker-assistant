@@ -13,6 +13,7 @@ import {
   editTransactionFor,
 } from "@/lib/db/transactions";
 import { findUser } from "@/lib/db/users";
+import { describeIssues, type ActionResult } from "@/lib/actions/result";
 import { resolveUserId } from "@/lib/identity";
 
 /**
@@ -21,16 +22,6 @@ import { resolveUserId } from "@/lib/identity";
  * validates its input against the same Valibot schemas the LLM's tool calls go through:
  * a form submission is exactly as untrusted as a model output.
  */
-
-export type ActionResult = { ok: true } | { ok: false; error: string };
-
-/** The first issue, with the field it belongs to, so the form can say what's wrong. */
-const describeIssues = (issues: [v.BaseIssue<unknown>, ...v.BaseIssue<unknown>[]]) => {
-  const [issue] = issues;
-  const field = v.getDotPath(issue);
-
-  return field ? `${field}: ${issue.message}` : issue.message;
-};
 
 export const addTransactionAction = async (
   input: unknown,
