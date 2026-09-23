@@ -5,7 +5,8 @@
 An AI assistant that records your income and expenses from plain-language messages
 ("lunch with the team 45k") or receipt photos. You can also ask it about your past
 spending. To use it, open https://financial-tracker-assistant-silk.vercel.app/ and sign
-in with Telegram. Then chat from the website or the Telegram bot. Send /help (or
+in with Telegram. Then chat from the website or the Telegram bot
+([@financial_tracker_assistant_bot](https://t.me/financial_tracker_assistant_bot)). Send /help (or
 /start on Telegram) to see everything it can do. The dashboard shows your
 transactions, charts and budgets.
 
