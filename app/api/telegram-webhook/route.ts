@@ -155,6 +155,75 @@ const getHandler = () => {
     );
   });
 
+  /**
+   * A receipt photo. Telegram hosts the file, so it is fetched, read once and dropped —
+   * nothing is stored on our side.
+   */
+  bot.on("message:photo", async (ctx) => {
+    const sender = await requireRegistered(ctx);
+
+    if (!sender) {
+      return;
+    }
+
+    // `photo` is the same image at several sizes, smallest first. The largest is the
+    // only one with a chance of legible receipt text.
+    const largest = ctx.message.photo.at(-1);
+
+    if (!largest) {
+      return;
+    }
+
+    let dataUrl: string;
+
+    try {
+      const file = await ctx.api.getFile(largest.file_id);
+
+      if (!file.file_path) {
+        throw new Error("Telegram returned no file path.");
+      }
+
+      const response = await fetch(
+        `https://api.telegram.org/file/bot${token}/${file.file_path}`,
+      );
+
+      if (!response.ok) {
+        throw new Error(`Telegram file download failed (${response.status}).`);
+      }
+
+      const bytes = Buffer.from(await response.arrayBuffer());
+
+      dataUrl = `data:image/jpeg;base64,${bytes.toString("base64")}`;
+    } catch (error) {
+      // Surfaced: a silent failure here looks like the bot ignored the photo.
+      console.error("could not fetch telegram photo", error);
+      await ctx.reply("I could not download that photo. Try sending it again.");
+
+      return;
+    }
+
+    const result = await handleAgentMessage({
+      userId: sender.id,
+      message:
+        ctx.message.caption ??
+        "Here is a receipt — log it as a single transaction.",
+      image: { dataUrl },
+      source: "telegram",
+    });
+
+    const body = result.ok ? result.reply : result.error;
+    const html =
+      toTelegramHtml(body) +
+      (result.ok ? transactionCard(result.transaction) : "");
+
+    try {
+      await ctx.reply(html, { parse_mode: "HTML" });
+    } catch (error) {
+      console.error("telegram HTML reply rejected, sending plain text", error);
+      await ctx.reply(body);
+    }
+  });
+
   bot.on("message:text", async (ctx) => {
     const sender = await requireRegistered(ctx);
 
