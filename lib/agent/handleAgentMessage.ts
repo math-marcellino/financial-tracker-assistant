@@ -22,7 +22,6 @@ import {
 import { getDb } from "@/lib/db";
 import { appendMessage, listMessages } from "@/lib/db/messages";
 import {
-  budgets,
   users,
   type Message,
   type Transaction,
@@ -34,6 +33,7 @@ import {
   editTransactionFor,
   listBudgetsWithSpend,
   listTransactionsFor,
+  setBudgetFor,
   summarizeTransactionsFor,
 } from "@/lib/db/transactions";
 
@@ -266,29 +266,12 @@ const executeToolCall = async (
   }
 
   const input = args as SetBudgetArgs;
-  const month = input.month ?? toIsoDate(now).slice(0, 7);
-  const currency = input.currency ?? defaultCurrency;
+  const row = await setBudgetFor(userId, input, defaultCurrency, now);
 
-  const [row] = await getDb()
-    .insert(budgets)
-    .values({
-      userId,
-      category: input.category,
-      limitAmount: input.limit.toFixed(2),
-      currency,
-      month: `${month}-01`,
-    })
-    .onConflictDoUpdate({
-      target: [budgets.userId, budgets.category, budgets.month],
-      set: {
-        limitAmount: input.limit.toFixed(2),
-        currency,
-        updatedAt: new Date(),
-      },
-    })
-    .returning();
-
-  return { transaction: null, result: { status: "saved", id: row.id, month } };
+  return {
+    transaction: null,
+    result: { status: "saved", id: row.id, month: row.month.slice(0, 7) },
+  };
 };
 
 /** Frozen at the time of the turn, so the card can never drift from the reply text. */

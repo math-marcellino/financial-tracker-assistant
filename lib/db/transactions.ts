@@ -7,10 +7,16 @@ import {
   type AddTransactionArgs,
   type EditTransactionArgs,
   type ListTransactionsArgs,
+  type SetBudgetArgs,
   type SummarizeTransactionsArgs,
 } from "@/lib/agent/tools";
 import { getDb } from "@/lib/db";
-import { budgets, transactions, type Transaction } from "@/lib/db/schema";
+import {
+  budgets,
+  transactions,
+  type Budget,
+  type Transaction,
+} from "@/lib/db/schema";
 
 const DEFAULT_LIST_LIMIT = 20;
 
@@ -271,6 +277,56 @@ export const listTransactionMonths = async (
 export type DashboardTransaction = Awaited<
   ReturnType<typeof listRecentForUser>
 >[number];
+
+/**
+ * Set or replace the limit for one category in one month. An upsert on
+ * (user, category, month): the agent's set_budget and the dashboard's budget form both
+ * land here, and setting a budget that already exists updates it rather than
+ * duplicating it.
+ */
+export const setBudgetFor = async (
+  userId: number,
+  input: SetBudgetArgs,
+  defaultCurrency: string,
+  now: Date,
+): Promise<Budget> => {
+  const month = input.month ?? now.toISOString().slice(0, 7);
+  const currency = input.currency ?? defaultCurrency;
+
+  const [row] = await getDb()
+    .insert(budgets)
+    .values({
+      userId,
+      category: input.category,
+      limitAmount: input.limit.toFixed(2),
+      currency,
+      month: `${month}-01`,
+    })
+    .onConflictDoUpdate({
+      target: [budgets.userId, budgets.category, budgets.month],
+      set: {
+        limitAmount: input.limit.toFixed(2),
+        currency,
+        updatedAt: new Date(),
+      },
+    })
+    .returning();
+
+  return row;
+};
+
+/** Removes the limit only — the transactions it measured are untouched. */
+export const deleteBudgetFor = async (
+  userId: number,
+  id: string,
+): Promise<Budget | null> => {
+  const [row] = await getDb()
+    .delete(budgets)
+    .where(and(eq(budgets.id, id), eq(budgets.userId, userId)))
+    .returning();
+
+  return row ?? null;
+};
 
 /** Below either threshold a daily rate is noise, so no pace is shown at all. */
 const PACE_MIN_DAYS = 5;
