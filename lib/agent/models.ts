@@ -64,6 +64,38 @@ export const listAvailableModels = async (): Promise<AvailableModel[]> => {
 };
 
 /**
+ * Models that accept image content.
+ *
+ * Groq's model list does not advertise this, and the only honest way to discover it is
+ * to try: the gpt-oss models reject an image part outright with "content must be a
+ * string", while qwen accepts it. Hard-coding the prefix is a known-stale-able choice,
+ * so an unknown model is assumed text-only rather than assumed capable.
+ */
+const VISION_MODEL_PREFIXES = ["qwen/"];
+
+export const supportsVision = (modelId: string): boolean =>
+  VISION_MODEL_PREFIXES.some((prefix) => modelId.startsWith(prefix));
+
+/**
+ * The model to use when the turn includes an image.
+ *
+ * A text-only model does not degrade on image input — it fails the whole request — so
+ * the user's preference is overridden rather than honoured into an error. The caller
+ * is told, so the switch is visible instead of silent.
+ */
+export const resolveVisionModel = async (
+  preferred: string,
+): Promise<string | null> => {
+  if (supportsVision(preferred)) {
+    return preferred;
+  }
+
+  const available = await listAvailableModels();
+
+  return available.find((model) => supportsVision(model.id))?.id ?? null;
+};
+
+/**
  * A model id from a client is untrusted input, same as a tool-call argument. Returns
  * the fallback when the id isn't one Groq currently offers.
  */

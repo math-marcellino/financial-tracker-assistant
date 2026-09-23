@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import * as v from "valibot";
 
 import { LLM_MODEL, getGroq } from "@/lib/agent/llm";
-import { resolveModel } from "@/lib/agent/models";
+import { resolveModel, resolveVisionModel } from "@/lib/agent/models";
 import {
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
@@ -55,9 +55,13 @@ export type AgentEvent =
   | { type: "done"; reply: string; transaction: Transaction | null }
   | { type: "error"; error: string };
 
+/** A receipt or invoice photo, as a data URL. Never stored — read once, then dropped. */
+export type ImageInput = { dataUrl: string };
+
 export type HandleAgentMessageInput = {
   userId: number;
   message: string;
+  image?: ImageInput;
   /** Which surface the message came from. Both share one thread per user. */
   source?: "web" | "telegram";
   /** Injectable so the caller controls "today"; defaults to the server's clock. */
@@ -121,6 +125,10 @@ const buildSystemInstruction = (defaultCurrency: string, now: Date): string =>
     "Moving money between the user's own accounts is NOT income and NOT an expense. Withdrawing cash, topping up an e-wallet, transferring to savings, paying off a credit card, or cashing out — none of these change what the user is worth, so do not record them.",
     "If a message could be either a transfer or real income, do not guess and do not call a tool. Reply with one short question asking which it was.",
     "If the user asks for something no tool covers, answer in plain text. Never force an unrelated tool call.",
+    // The image is read once and discarded, so nothing downstream can re-check it.
+    "When given a photo of a receipt, bill or invoice: read the FINAL total the customer paid, including tax and service charge, and log it as ONE transaction. Do not log a row per line item.",
+    "Put the merchant name in the note. Use the date printed on the receipt; if there is none, use today.",
+    "If the total, the date or the currency is unreadable, do not guess — say which part you could not read and ask for it.",
     // Out-of-scope answers were inventing exchange rates and app features. A made-up
     // figure in a finance tool is worse than "I don't know" — it looks authoritative.
     "Never state an exchange rate, market price, or any financial figure you did not get from a tool. If you do not have it, say you do not have it.",
@@ -338,6 +346,7 @@ const toChatMessage = (row: Message): ChatCompletionMessageParam =>
 export async function* streamAgentMessage({
   userId,
   message,
+  image,
   source = "web",
   now = new Date(),
 }: HandleAgentMessageInput): AsyncGenerator<AgentEvent> {
@@ -361,6 +370,24 @@ export async function* streamAgentMessage({
 
   try {
     model = await resolveModel(user.preferredModel, LLM_MODEL);
+
+    if (image) {
+      // A text-only model rejects the whole request rather than ignoring the image,
+      // so the preference is overridden here instead of failing downstream.
+      const visionModel = await resolveVisionModel(model);
+
+      if (!visionModel) {
+        yield {
+          type: "error",
+          error:
+            "None of the models available on this account can read images. Try describing the receipt instead.",
+        };
+
+        return;
+      }
+
+      model = visionModel;
+    }
   } catch (error) {
     yield {
       type: "error",
@@ -377,7 +404,18 @@ export async function* streamAgentMessage({
       content: buildSystemInstruction(user.defaultCurrency, now),
     },
     ...history.map(toChatMessage),
-    { role: "user", content: message },
+    image
+      ? {
+          role: "user" as const,
+          content: [
+            { type: "text" as const, text: message },
+            {
+              type: "image_url" as const,
+              image_url: { url: image.dataUrl },
+            },
+          ],
+        }
+      : { role: "user" as const, content: message },
   ];
 
   // The transaction the UI shows: whichever one the last write touched.
