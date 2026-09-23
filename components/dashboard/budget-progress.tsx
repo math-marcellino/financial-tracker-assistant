@@ -1,7 +1,51 @@
 "use client";
 
-import type { BudgetProgress as BudgetRow } from "@/lib/db/transactions";
-import { formatAmount, humanizeCategory } from "@/lib/format";
+import type {
+  BudgetPace,
+  BudgetProgress as BudgetRow,
+} from "@/lib/db/transactions";
+import { formatAmount, formatCompact, humanizeCategory } from "@/lib/format";
+
+const formatDay = (isoDate: string): string =>
+  new Date(`${isoDate}T00:00:00`).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+
+/**
+ * One line, read-only. Every number is from SQL; this only picks the words. Absent
+ * entirely when there's no pace — "not enough data" on every new budget would be noise.
+ */
+const PaceLine = ({
+  pace,
+  limit,
+  currency,
+}: {
+  pace: BudgetPace;
+  limit: number;
+  currency: string;
+}) => {
+  const rate = `~${formatAmount(String(Math.round(Number(pace.dailyPace))), currency)}/day`;
+  const projected = formatCompact(Number(pace.projectedTotal), currency);
+
+  const outlook = pace.limitDate
+    ? `on pace to hit the limit ${formatDay(pace.limitDate)}`
+    : Number(pace.projectedTotal) > limit
+      ? `≈ ${projected} by month end at this rate`
+      : `on track · ≈ ${projected} by month end`;
+
+  return (
+    <p
+      className={`text-[0.8125rem] ${
+        pace.limitDate ? "text-[var(--co-error)]" : "text-[var(--co-muted)]"
+      }`}
+    >
+      <span className="font-mono tabular-nums">{rate}</span>
+      {" · "}
+      {outlook}
+    </p>
+  );
+};
 
 /**
  * Progress against whatever `set_budget` has written. Both numbers come from SQL —
@@ -68,6 +112,14 @@ export const BudgetProgressList = ({ budgets }: { budgets: BudgetRow[] }) => {
                 }}
               />
             </div>
+
+            {budget.pace ? (
+              <PaceLine
+                pace={budget.pace}
+                limit={limit}
+                currency={budget.currency}
+              />
+            ) : null}
 
             <div className="flex items-center justify-between gap-4 text-[0.8125rem]">
               <span className="font-mono tracking-[0.28px] text-[var(--co-slate)] uppercase">

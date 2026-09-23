@@ -19,6 +19,19 @@ export const EXPENSE_CATEGORIES = transactionCategoryExpense.enumValues;
 export const INCOME_CATEGORIES = transactionCategoryIncome.enumValues;
 export const TRANSACTION_TYPES = transactionType.enumValues;
 
+/**
+ * Paid in one or two lumps a month, so "spend so far ÷ days elapsed" says nothing about
+ * where the month ends. No pace estimate is ever given for these.
+ */
+export const PACE_EXCLUDED_CATEGORIES = [
+  "housing",
+  "utilities",
+  "subscriptions",
+  "education",
+  "travel",
+  "gifts_donations",
+] as const satisfies readonly (typeof EXPENSE_CATEGORIES)[number][];
+
 /** numeric(14, 2) holds ten digits ahead of the decimal point. */
 const MAX_AMOUNT = 9_999_999_999.99;
 

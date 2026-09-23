@@ -3,6 +3,7 @@ import { and, desc, eq, gte, lte, sql, sum, type SQL } from "drizzle-orm";
 import {
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
+  PACE_EXCLUDED_CATEGORIES,
   type AddTransactionArgs,
   type EditTransactionArgs,
   type ListTransactionsArgs,
@@ -271,6 +272,27 @@ export type DashboardTransaction = Awaited<
   ReturnType<typeof listRecentForUser>
 >[number];
 
+/** Below either threshold a daily rate is noise, so no pace is shown at all. */
+const PACE_MIN_DAYS = 5;
+const PACE_MIN_TRANSACTIONS = 3;
+
+/** Why a budget has no pace. `ok` is the only status that carries one. */
+export type PaceStatus =
+  | "ok"
+  | "not_current_month"
+  | "excluded_category"
+  | "no_spend"
+  | "too_little_data";
+
+export type BudgetPace = {
+  /** Spend so far divided by days elapsed in the month, today included. */
+  dailyPace: string;
+  /** Where the month ends if that rate holds. */
+  projectedTotal: string;
+  /** The day the limit is crossed at this rate. Null when on track or already over. */
+  limitDate: string | null;
+};
+
 export type BudgetProgress = {
   id: string;
   category: string;
@@ -278,24 +300,45 @@ export type BudgetProgress = {
   spent: string;
   currency: string;
   month: string;
+  paceStatus: PaceStatus;
+  pace: BudgetPace | null;
 };
+
+const isoToday = (): string => new Date().toISOString().slice(0, 10);
 
 /**
  * Budgets with the spend they're measured against, summed by Postgres over the budget's
  * own month. Doing the arithmetic in SQL keeps it correct regardless of how many rows
  * there are, and keeps the client from having to re-derive it.
+ *
+ * The pace estimate is SQL too, and deliberately conservative: it only exists for the
+ * month `today` falls in, once there are enough days and entries to mean something, and
+ * never for categories paid in one or two lumps (rent on the 1st would read as a
+ * daily rate that blows the budget by the 3rd). A projection that's wrong is worse
+ * than none, so every other case returns a status and no numbers.
  */
 export const listBudgetsWithSpend = async (
   userId: number,
-  month?: string | null,
+  options: {
+    month?: string | null;
+    category?: string | null;
+    /** YYYY-MM-DD. The agent passes its own clock; everything else uses the server's. */
+    today?: string;
+  } = {},
 ): Promise<BudgetProgress[]> => {
+  const { month, category, today = isoToday() } = options;
+
   const filters: SQL[] = [eq(budgets.userId, userId)];
 
   if (month) {
     filters.push(sql`to_char(${budgets.month}, 'YYYY-MM') = ${month}`);
   }
 
-  const rows = await getDb()
+  if (category) {
+    filters.push(sql`${budgets.category}::text = ${category}`);
+  }
+
+  const base = getDb()
     .select({
       id: budgets.id,
       category: budgets.category,
@@ -309,14 +352,83 @@ export const listBudgetsWithSpend = async (
           and t.type = 'expense'
           and t.category_expense = ${budgets.category}
           and date_trunc('month', t.date) = date_trunc('month', ${budgets.month})
-      ), 0)::text`,
+      ), 0)`.as("spent"),
+      txCount: sql<number>`(
+        select count(*)
+        from ${transactions} t
+        where t.user_id = ${budgets.userId}
+          and t.type = 'expense'
+          and t.category_expense = ${budgets.category}
+          and date_trunc('month', t.date) = date_trunc('month', ${budgets.month})
+      )::int`.as("tx_count"),
+      // date - date is an integer day count in Postgres. Inclusive of today.
+      daysElapsed: sql<number>`(${today}::date - ${budgets.month} + 1)`.as(
+        "days_elapsed",
+      ),
+      daysInMonth:
+        sql<number>`extract(day from (${budgets.month} + interval '1 month' - interval '1 day'))::int`.as(
+          "days_in_month",
+        ),
     })
     .from(budgets)
     .where(and(...filters))
-    .orderBy(desc(budgets.month), budgets.category);
+    .as("b");
+
+  const excluded = sql.join(
+    PACE_EXCLUDED_CATEGORIES.map((excludedCategory) => sql`${excludedCategory}`),
+    sql`, `,
+  );
+
+  const paceStatus = sql<PaceStatus>`case
+    when ${base.daysElapsed} < 1 or ${base.daysElapsed} > ${base.daysInMonth} then 'not_current_month'
+    when ${base.category}::text in (${excluded}) then 'excluded_category'
+    when ${base.spent} = 0 then 'no_spend'
+    when ${base.daysElapsed} < ${PACE_MIN_DAYS} or ${base.txCount} < ${PACE_MIN_TRANSACTIONS} then 'too_little_data'
+    else 'ok'
+  end`;
+
+  const dailyRate = sql`(${base.spent}::numeric / ${base.daysElapsed})`;
+
+  const rows = await getDb()
+    .select({
+      id: base.id,
+      category: base.category,
+      limitAmount: base.limitAmount,
+      currency: base.currency,
+      month: base.month,
+      spent: sql<string>`${base.spent}::text`,
+      paceStatus,
+      dailyPace: sql<string | null>`case when ${paceStatus} = 'ok'
+        then round(${dailyRate}, 2)::text end`,
+      projectedTotal: sql<string | null>`case when ${paceStatus} = 'ok'
+        then round(${dailyRate} * ${base.daysInMonth}, 2)::text end`,
+      // Day N of the month is month + (N - 1). Only a date inside the month counts —
+      // past the end means the limit holds, and an overspent budget has no future
+      // crossing to predict.
+      limitDate: sql<string | null>`case
+        when ${paceStatus} = 'ok' and ${base.spent} < ${base.limitAmount}
+          and ceil(${base.limitAmount} / ${dailyRate}) <= ${base.daysInMonth}
+        then to_char(${base.month} + (ceil(${base.limitAmount} / ${dailyRate})::int - 1), 'YYYY-MM-DD')
+      end`,
+    })
+    .from(base)
+    .orderBy(desc(base.month), base.category);
 
   return rows.map((row) => ({
-    ...row,
+    id: row.id,
+    category: row.category,
+    limitAmount: row.limitAmount,
+    currency: row.currency,
     month: String(row.month).slice(0, 10),
+    spent: row.spent,
+    paceStatus: row.paceStatus,
+    pace:
+      row.dailyPace !== null && row.projectedTotal !== null
+        ? {
+            dailyPace: row.dailyPace,
+            projectedTotal: row.projectedTotal,
+            limitDate: row.limitDate,
+          }
+        : null,
   }));
 };

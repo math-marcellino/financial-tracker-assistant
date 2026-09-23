@@ -18,6 +18,8 @@ export const GET = async (request: Request): Promise<Response> => {
   }
 
   return Response.json({
-    budgets: await listBudgetsWithSpend(identity.userId, readMonth(request)),
+    budgets: await listBudgetsWithSpend(identity.userId, {
+      month: readMonth(request),
+    }),
   });
 };
