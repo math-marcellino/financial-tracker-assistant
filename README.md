@@ -9,6 +9,8 @@ in with Telegram. Then chat from the website or the Telegram bot. Send /help (or
 /start on Telegram) to see everything it can do. The dashboard shows your
 transactions, charts and budgets.
 
+**Demo video:** https://www.loom.com/share/a3544c9e335449bea1ed66a2ba8403d6
+
 ## Who it's for, and the one job it does well
 
 For anyone who wants to track their spending but struggles to keep up with it. The one job it does well
