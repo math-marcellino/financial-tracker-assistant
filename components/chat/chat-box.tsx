@@ -1,8 +1,8 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUp, Copy } from "lucide-react";
-import { useRef, useState } from "react";
+import { AlertTriangle, ArrowUp, Copy, Paperclip, X } from "lucide-react";
+import { useRef, useState, type ChangeEvent } from "react";
 
 import { ModelPicker } from "@/components/chat/model-picker";
 import { Button } from "@/components/ui/button";
@@ -159,6 +159,11 @@ export const ChatBox = ({ userId }: { userId: number }) => {
   // Errors are per-attempt and not worth storing; they live only in this view.
   const [errors, setErrors] = useState<string[]>([]);
   const [activeTool, setActiveTool] = useState<string | null>(null);
+  // Held as a data URL: read once, sent once, never stored anywhere.
+  const [image, setImage] = useState<{ dataUrl: string; name: string } | null>(
+    null,
+  );
+  const fileRef = useRef<HTMLInputElement>(null);
   const [liveStream, setLiveStream] = useState<PushStream | null>(null);
   const streamRef = useRef<PushStream | null>(null);
 
@@ -179,10 +184,41 @@ export const ChatBox = ({ userId }: { userId: number }) => {
     }
   });
 
+  const pickImage = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    // ~4 MB, matching the route's cap. Checked here too so the user hears about it
+    // before uploading rather than after.
+    if (file.size > 4_000_000) {
+      setErrors((current) => [
+        ...current,
+        `${file.name} is too large — under 4 MB, please.`,
+      ]);
+      event.target.value = "";
+
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = () =>
+      setImage({ dataUrl: String(reader.result), name: file.name });
+    reader.onerror = () =>
+      setErrors((current) => [...current, `Could not read ${file.name}.`]);
+    reader.readAsDataURL(file);
+
+    event.target.value = "";
+  };
+
   const send = (text: string) => {
     const message = text.trim();
 
-    if (!message || isPending) {
+    // An image on its own is a complete message; text on its own is too.
+    if ((!message && !image) || isPending) {
       return;
     }
 
@@ -190,37 +226,43 @@ export const ChatBox = ({ userId }: { userId: number }) => {
 
     streamRef.current = stream;
     setLiveStream(stream);
+    const attached = image?.dataUrl;
+
     setDraft("");
+    setImage(null);
     setErrors([]);
     setActiveTool(null);
 
-    mutate(message, {
-      onSuccess: (result) => {
-        if (!result.ok) {
-          setErrors((current) => [...current, result.error]);
-        }
+    mutate(
+      { message, image: attached },
+      {
+        onSuccess: (result) => {
+          if (!result.ok) {
+            setErrors((current) => [...current, result.error]);
+          }
 
-        // The turn is persisted server-side, so refetch rather than guessing at it.
-        // A tool call may have written a transaction or a budget, so those go too.
-        for (const queryKey of [
-          messagesQueryKey(userId),
-          transactionsQueryKey(userId),
-          budgetsQueryKey(userId),
-        ]) {
-          void queryClient.invalidateQueries({ queryKey });
-        }
+          // The turn is persisted server-side, so refetch rather than guessing at it.
+          // A tool call may have written a transaction or a budget, so those go too.
+          for (const queryKey of [
+            messagesQueryKey(userId),
+            transactionsQueryKey(userId),
+            budgetsQueryKey(userId),
+          ]) {
+            void queryClient.invalidateQueries({ queryKey });
+          }
+        },
+        // A failed request is shown, not swallowed into a cheerful placeholder reply.
+        onError: (error) => {
+          setErrors((current) => [...current, error.message]);
+        },
+        onSettled: () => {
+          stream.close();
+          streamRef.current = null;
+          setLiveStream(null);
+          setActiveTool(null);
+        },
       },
-      // A failed request is shown, not swallowed into a cheerful placeholder reply.
-      onError: (error) => {
-        setErrors((current) => [...current, error.message]);
-      },
-      onSettled: () => {
-        stream.close();
-        streamRef.current = null;
-        setLiveStream(null);
-        setActiveTool(null);
-      },
-    });
+    );
   };
 
   const isEmpty = !isLoadingHistory && messages.length === 0;
@@ -333,14 +375,59 @@ export const ChatBox = ({ userId }: { userId: number }) => {
           className="relative z-10 w-full rounded-[var(--radius-xs)] border border-[var(--co-hairline)] bg-[var(--co-canvas)] p-0 pt-1 transition-[border-color] duration-150 focus-within:border-[var(--co-form-focus)]"
         >
           <div className="flex flex-col">
+            {/* The pending attachment sits inside the composer, so it is obviously
+                part of the message you are about to send. */}
+            {image ? (
+              <div className="mx-3 mt-3 flex items-center gap-3 rounded-[var(--radius-xs)] border border-[var(--co-hairline)] bg-[var(--co-surface-strong,var(--co-canvas))] p-2">
+                {/* eslint-disable-next-line @next/next/no-img-element -- a local
+                    data URL, never optimised and never remote. */}
+                <img
+                  src={image.dataUrl}
+                  alt=""
+                  className="size-10 rounded-[var(--radius-xs)] object-cover"
+                />
+                <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-[var(--co-body-muted)]">
+                  {image.name}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setImage(null)}
+                  aria-label="Remove attachment"
+                  className="rounded-full p-1 text-[var(--co-muted)] transition-colors hover:text-[var(--co-ink)]"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ) : null}
+
             <PromptInputTextarea
-              placeholder="Ask anything, or log an expense"
+              placeholder="Ask anything, log an expense, or attach a receipt"
               aria-label="Message"
               className="min-h-[46px] pt-3 pl-4 text-base leading-[1.35] sm:text-base md:text-base"
             />
 
             <PromptInputActions className="mt-2 flex w-full items-center justify-between gap-2 p-2">
-              <div />
+              <div>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  onChange={pickImage}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Attach a receipt"
+                  title="Attach a receipt"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={isPending}
+                  className="size-9 rounded-full text-[var(--co-muted)]"
+                >
+                  <Paperclip size={17} />
+                </Button>
+              </div>
               {/* Not wrapped in PromptInputAction/MessageAction: their TooltipTrigger
                   renders its own button, which would nest one button inside another. */}
               <Button
@@ -350,7 +437,7 @@ export const ChatBox = ({ userId }: { userId: number }) => {
                 title="Send"
                 className="co-pill size-10 rounded-full"
                 onClick={() => send(draft)}
-                disabled={isPending || draft.trim().length === 0}
+                disabled={isPending || (draft.trim().length === 0 && !image)}
               >
                 <ArrowUp size={18} />
               </Button>

@@ -11,12 +11,21 @@ import { resolveUserId } from "@/lib/identity";
 // tool call is. Keep this file thin: parsing and categorization belong in the agent core,
 // which the Telegram webhook will wrap too.
 
+/** Roughly 6 MB of base64, i.e. ~4.5 MB of image. Larger is a phone photo nobody resized. */
+const MAX_IMAGE_CHARS = 6_000_000;
+
 const BodySchema = v.object({
-  message: v.pipe(
-    v.string(),
-    v.trim(),
-    v.minLength(1, "Message is empty."),
-    v.maxLength(2000),
+  // With an image attached the text may be empty — the picture is the message.
+  message: v.pipe(v.string(), v.trim(), v.maxLength(2000)),
+  image: v.optional(
+    v.pipe(
+      v.string(),
+      v.regex(
+        /^data:image\/(png|jpe?g|webp|gif);base64,/,
+        "Only PNG, JPEG, WebP or GIF images are accepted.",
+      ),
+      v.maxLength(MAX_IMAGE_CHARS, "That image is too large — under 4 MB, please."),
+    ),
   ),
 });
 
@@ -47,11 +56,24 @@ export const POST = async (request: Request): Promise<Response> => {
     );
   }
 
+  // One of the two has to carry intent; an empty message with no image is nothing.
+  if (!parsed.output.message && !parsed.output.image) {
+    return Response.json(
+      { ok: false, error: "Message is empty." },
+      { status: 400 },
+    );
+  }
+
   await ensureUser(identity.userId);
 
   const events = streamAgentMessage({
     userId: identity.userId,
-    message: parsed.output.message,
+    message:
+      parsed.output.message ||
+      "Here is a receipt — log it as a single transaction.",
+    image: parsed.output.image
+      ? { dataUrl: parsed.output.image }
+      : undefined,
     source: "web",
   });
 

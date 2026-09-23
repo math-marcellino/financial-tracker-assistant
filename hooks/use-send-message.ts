@@ -8,9 +8,13 @@ import type {
 } from "@/lib/agent/handleAgentMessage";
 import { sendChatMessage } from "@/lib/api/chat";
 
+/** A turn is text, an image, or both — the picture can be the whole message. */
+export type OutgoingMessage = { message: string; image?: string };
+
 export const useSendMessage = (
   onEvent: (event: AgentEvent) => void,
-): UseMutationResult<AgentResult, Error, string> =>
+): UseMutationResult<AgentResult, Error, OutgoingMessage> =>
   useMutation({
-    mutationFn: (message: string) => sendChatMessage(message, onEvent),
+    mutationFn: ({ message, image }: OutgoingMessage) =>
+      sendChatMessage(message, onEvent, image),
   });

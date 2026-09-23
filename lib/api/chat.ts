@@ -7,11 +7,12 @@ import type { AgentEvent, AgentResult } from "@/lib/agent/handleAgentMessage";
 export const sendChatMessage = async (
   message: string,
   onEvent: (event: AgentEvent) => void,
+  image?: string,
 ): Promise<AgentResult> => {
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify(image ? { message, image } : { message }),
   });
 
   if (!response.ok || !response.body) {
