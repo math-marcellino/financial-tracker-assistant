@@ -1,5 +1,5 @@
 import type { ChatCompletionMessageParam } from "groq-sdk/resources/chat/completions";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import * as v from "valibot";
 
 import { LLM_MODEL, getGroq } from "@/lib/agent/llm";
@@ -22,13 +22,15 @@ import { getDb } from "@/lib/db";
 import { appendMessage, listMessages } from "@/lib/db/messages";
 import {
   budgets,
-  transactions,
   users,
   type Message,
   type Transaction,
   type TransactionSnapshot,
 } from "@/lib/db/schema";
 import {
+  createTransactionFor,
+  deleteTransactionFor,
+  editTransactionFor,
   listTransactionsFor,
   summarizeTransactionsFor,
 } from "@/lib/db/transactions";
@@ -155,105 +157,42 @@ const executeToolCall = async (
   result: Record<string, unknown>;
 }> => {
   if (name === "add_transaction") {
-    const input = args as AddTransactionArgs;
-    const isExpense = input.type === "expense";
-
-    const [row] = await getDb()
-      .insert(transactions)
-      .values({
-        userId,
-        amount: input.amount.toFixed(2),
-        currency: input.currency ?? defaultCurrency,
-        type: input.type,
-        // The model sees one flat category; the two-column split is ours.
-        categoryExpense: isExpense
-          ? (input.category as Transaction["categoryExpense"])
-          : null,
-        categoryIncome: isExpense
-          ? null
-          : (input.category as Transaction["categoryIncome"]),
-        date: input.date,
-        note: input.note ?? null,
-      })
-      .returning();
+    const row = await createTransactionFor(
+      userId,
+      args as AddTransactionArgs,
+      defaultCurrency,
+    );
 
     return { transaction: row, result: { status: "created", id: row.id } };
   }
 
   if (name === "edit_transaction") {
     const input = args as EditTransactionArgs;
+    const outcome = await editTransactionFor(userId, input);
 
-    const [existing] = await getDb()
-      .select()
-      .from(transactions)
-      .where(
-        and(eq(transactions.id, input.id), eq(transactions.userId, userId)),
-      );
-
-    if (!existing) {
+    if (outcome.status === "not_found") {
       return {
         transaction: null,
         result: { status: "not_found", id: input.id },
       };
     }
 
-    // A category can arrive without a type, so the effective type has to come from the
-    // stored row before we know which column it belongs in.
-    const effectiveType = input.type ?? existing.type;
-
-    if (input.category !== undefined) {
-      const allowed =
-        effectiveType === "expense"
-          ? (EXPENSE_CATEGORIES as readonly string[])
-          : (INCOME_CATEGORIES as readonly string[]);
-
-      if (!allowed.includes(input.category)) {
-        return {
-          transaction: null,
-          result: {
-            status: "rejected",
-            reason: `Category ${input.category} does not belong to a ${effectiveType}.`,
-          },
-        };
-      }
+    if (outcome.status === "rejected") {
+      return {
+        transaction: null,
+        result: { status: "rejected", reason: outcome.reason },
+      };
     }
 
-    const category =
-      input.category ?? existing.categoryExpense ?? existing.categoryIncome;
-    const isExpense = effectiveType === "expense";
-
-    const [row] = await getDb()
-      .update(transactions)
-      .set({
-        ...(input.amount !== undefined && { amount: input.amount.toFixed(2) }),
-        ...(input.currency !== undefined && { currency: input.currency }),
-        ...(input.date !== undefined && { date: input.date }),
-        ...(input.note !== undefined && { note: input.note }),
-        type: effectiveType,
-        categoryExpense: isExpense
-          ? (category as Transaction["categoryExpense"])
-          : null,
-        categoryIncome: isExpense
-          ? null
-          : (category as Transaction["categoryIncome"]),
-      })
-      .where(
-        and(eq(transactions.id, input.id), eq(transactions.userId, userId)),
-      )
-      .returning();
-
-    return { transaction: row, result: { status: "updated", id: row.id } };
+    return {
+      transaction: outcome.transaction,
+      result: { status: "updated", id: outcome.transaction.id },
+    };
   }
 
   if (name === "delete_transaction") {
     const input = args as DeleteTransactionArgs;
-
-    const [row] = await getDb()
-      .delete(transactions)
-      .where(
-        and(eq(transactions.id, input.id), eq(transactions.userId, userId)),
-      )
-      .returning();
+    const row = await deleteTransactionFor(userId, input.id);
 
     return {
       transaction: null,

@@ -1,11 +1,15 @@
 import { and, desc, eq, gte, lte, sql, sum, type SQL } from "drizzle-orm";
 
-import type {
-  ListTransactionsArgs,
-  SummarizeTransactionsArgs,
+import {
+  EXPENSE_CATEGORIES,
+  INCOME_CATEGORIES,
+  type AddTransactionArgs,
+  type EditTransactionArgs,
+  type ListTransactionsArgs,
+  type SummarizeTransactionsArgs,
 } from "@/lib/agent/tools";
 import { getDb } from "@/lib/db";
-import { budgets, transactions } from "@/lib/db/schema";
+import { budgets, transactions, type Transaction } from "@/lib/db/schema";
 
 const DEFAULT_LIST_LIMIT = 20;
 
@@ -14,6 +18,114 @@ export type TransactionSummaryRow = {
   total: string;
   count: number;
   currency: string;
+};
+
+/**
+ * The writes. The agent's tool calls and the dashboard's manual form both land here, so
+ * a fix to how a transaction is stored can never reach only one of them. Callers
+ * validate first: everything arriving here has already passed its Valibot schema.
+ */
+export const createTransactionFor = async (
+  userId: number,
+  input: AddTransactionArgs,
+  defaultCurrency: string,
+): Promise<Transaction> => {
+  const isExpense = input.type === "expense";
+
+  const [row] = await getDb()
+    .insert(transactions)
+    .values({
+      userId,
+      amount: input.amount.toFixed(2),
+      currency: input.currency ?? defaultCurrency,
+      type: input.type,
+      // Callers see one flat category; the two-column split is ours.
+      categoryExpense: isExpense
+        ? (input.category as Transaction["categoryExpense"])
+        : null,
+      categoryIncome: isExpense
+        ? null
+        : (input.category as Transaction["categoryIncome"]),
+      date: input.date,
+      note: input.note ?? null,
+    })
+    .returning();
+
+  return row;
+};
+
+export type EditTransactionResult =
+  | { status: "updated"; transaction: Transaction }
+  | { status: "not_found" }
+  | { status: "rejected"; reason: string };
+
+export const editTransactionFor = async (
+  userId: number,
+  input: EditTransactionArgs,
+): Promise<EditTransactionResult> => {
+  const [existing] = await getDb()
+    .select()
+    .from(transactions)
+    .where(and(eq(transactions.id, input.id), eq(transactions.userId, userId)));
+
+  if (!existing) {
+    return { status: "not_found" };
+  }
+
+  // A category can arrive without a type, so the effective type has to come from the
+  // stored row before we know which column it belongs in.
+  const effectiveType = input.type ?? existing.type;
+
+  if (input.category !== undefined) {
+    const allowed =
+      effectiveType === "expense"
+        ? (EXPENSE_CATEGORIES as readonly string[])
+        : (INCOME_CATEGORIES as readonly string[]);
+
+    if (!allowed.includes(input.category)) {
+      return {
+        status: "rejected",
+        reason: `Category ${input.category} does not belong to a ${effectiveType}.`,
+      };
+    }
+  }
+
+  const category =
+    input.category ?? existing.categoryExpense ?? existing.categoryIncome;
+  const isExpense = effectiveType === "expense";
+
+  const [row] = await getDb()
+    .update(transactions)
+    .set({
+      ...(input.amount !== undefined && { amount: input.amount.toFixed(2) }),
+      ...(input.currency !== undefined && { currency: input.currency }),
+      ...(input.date !== undefined && { date: input.date }),
+      ...(input.note !== undefined && { note: input.note }),
+      type: effectiveType,
+      categoryExpense: isExpense
+        ? (category as Transaction["categoryExpense"])
+        : null,
+      categoryIncome: isExpense
+        ? null
+        : (category as Transaction["categoryIncome"]),
+    })
+    .where(and(eq(transactions.id, input.id), eq(transactions.userId, userId)))
+    .returning();
+
+  return { status: "updated", transaction: row };
+};
+
+/** Null when there was nothing to delete — the caller decides how to report that. */
+export const deleteTransactionFor = async (
+  userId: number,
+  id: string,
+): Promise<Transaction | null> => {
+  const [row] = await getDb()
+    .delete(transactions)
+    .where(and(eq(transactions.id, id), eq(transactions.userId, userId)))
+    .returning();
+
+  return row ?? null;
 };
 
 /**
