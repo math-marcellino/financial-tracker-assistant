@@ -239,6 +239,26 @@ export const ChatBox = ({ userId }: { userId: number }) => {
     setLiveStream(stream);
     const attached = image?.dataUrl;
 
+    // Shown now, not when the reply lands. The server only persists the turn once the
+    // agent finishes, so this stands in until the refetch below replaces it.
+    const optimistic: ChatMessage = {
+      id: `pending-${crypto.randomUUID()}`,
+      userId,
+      role: "user",
+      source: "web",
+      content: message || `📎 ${image?.name ?? "Receipt"}`,
+      transactionId: null,
+      transactionSnapshot: null,
+      createdAt: new Date(),
+    };
+
+    // A history fetch still in flight would overwrite the optimistic row.
+    void queryClient.cancelQueries({ queryKey: messagesQueryKey(userId) });
+    queryClient.setQueryData<ChatMessage[]>(
+      messagesQueryKey(userId),
+      (current = []) => [...current, optimistic],
+    );
+
     setDraft("");
     setImage(null);
     setErrors([]);
@@ -251,10 +271,20 @@ export const ChatBox = ({ userId }: { userId: number }) => {
         onSuccess: (result) => {
           if (!result.ok) {
             setErrors((current) => [...current, result.error]);
+            // A failed turn is not persisted, so the optimistic bubble goes away on
+            // the refetch. Hand the text back rather than losing it.
+            setDraft((current) => current || message);
           }
-
+        },
+        // A failed request is shown, not swallowed into a cheerful placeholder reply.
+        onError: (error) => {
+          setErrors((current) => [...current, error.message]);
+          setDraft((current) => current || message);
+        },
+        onSettled: () => {
           // The turn is persisted server-side, so refetch rather than guessing at it.
-          // A tool call may have written a transaction or a budget, so those go too.
+          // This also drops the optimistic bubble. A tool call may have written a
+          // transaction or a budget, so those go too.
           for (const queryKey of [
             messagesQueryKey(userId),
             transactionsQueryKey(userId),
@@ -262,12 +292,7 @@ export const ChatBox = ({ userId }: { userId: number }) => {
           ]) {
             void queryClient.invalidateQueries({ queryKey });
           }
-        },
-        // A failed request is shown, not swallowed into a cheerful placeholder reply.
-        onError: (error) => {
-          setErrors((current) => [...current, error.message]);
-        },
-        onSettled: () => {
+
           stream.close();
           streamRef.current = null;
           setLiveStream(null);
