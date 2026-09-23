@@ -4,6 +4,7 @@ import {
   dehydrate,
 } from "@tanstack/react-query";
 
+import { AccountMenu } from "@/components/auth/account-menu";
 import { TelegramLogin } from "@/components/auth/telegram-login";
 import { Workspace } from "@/components/dashboard/workspace";
 import { messagesQueryKey } from "@/lib/api/messages";
@@ -48,7 +49,11 @@ export default async function DashboardPage() {
     );
   }
 
-  await ensureUser(identity.userId);
+  const user = await ensureUser(identity.userId);
+  // Telegram usernames are optional, so fall back through first name to the id.
+  const displayName = user.username
+    ? `@${user.username}`
+    : (user.firstName ?? String(user.telegramId));
 
   // Prefetch on the server, hydrate on the client: the thread is there on first paint
   // with no extra round-trip, and stays reactive afterwards.
@@ -72,7 +77,10 @@ export default async function DashboardPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <HydrationBoundary state={dehydrate(queryClient)}>
-        <Workspace userId={identity.userId} />
+        <Workspace
+          userId={identity.userId}
+          accountMenu={<AccountMenu name={displayName} via={identity.via} />}
+        />
       </HydrationBoundary>
     </div>
   );

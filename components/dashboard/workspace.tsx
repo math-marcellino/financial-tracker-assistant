@@ -13,7 +13,14 @@ import { DashboardPanel } from "@/components/dashboard/dashboard-panel";
  * Below `lg` there isn't room for both. The dashboard is the default view — it's the
  * thing you scan — and the chat opens over it as a drawer from a floating button.
  */
-export const Workspace = ({ userId }: { userId: number }) => {
+export const Workspace = ({
+  userId,
+  accountMenu,
+}: {
+  userId: number;
+  // Rendered by the Server Component so the signed-in name never round-trips.
+  accountMenu?: React.ReactNode;
+}) => {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   // Escape closes the drawer; a full-screen overlay with no keyboard exit is a trap.
@@ -38,9 +45,14 @@ export const Workspace = ({ userId }: { userId: number }) => {
           {/* The header lives inside the dashboard column so it tracks that column's
               centre, rather than being nudged into place with margins from outside. */}
           <header className="flex flex-col gap-2">
-            <h1 className="text-[2.25rem] leading-[1.1] font-normal tracking-[-0.48px] text-[var(--co-ink)]">
-              Money, in plain language
-            </h1>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <h1 className="text-[2.25rem] leading-[1.1] font-normal tracking-[-0.48px] text-[var(--co-ink)]">
+                Money, in plain language
+              </h1>
+              {accountMenu ? (
+                <div className="shrink-0 pt-2">{accountMenu}</div>
+              ) : null}
+            </div>
             <p className="text-[1.0625rem] leading-[1.4] text-[var(--co-body-muted)]">
               Tell it what you spent. Ask it what you&rsquo;ve spent.
             </p>

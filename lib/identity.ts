@@ -8,13 +8,18 @@ import { readSession } from "@/lib/session";
  * production so it cannot become an auth bypass.
  */
 export type IdentityResult =
-  { ok: true; userId: number } | { ok: false; error: string };
+  /**
+   * `via` matters to the UI: on the dev fallback there is no cookie to clear, so a
+   * sign-out button would appear to do nothing. The caller needs to know which it is.
+   */
+  | { ok: true; userId: number; via: "session" | "dev" }
+  | { ok: false; error: string };
 
 export const resolveUserId = async (): Promise<IdentityResult> => {
   const sessionUserId = await readSession();
 
   if (sessionUserId !== null) {
-    return { ok: true, userId: sessionUserId };
+    return { ok: true, userId: sessionUserId, via: "session" };
   }
 
   if (process.env.NODE_ENV === "production") {
@@ -36,5 +41,5 @@ export const resolveUserId = async (): Promise<IdentityResult> => {
     return { ok: false, error: "DEV_TELEGRAM_USER_ID must be an integer." };
   }
 
-  return { ok: true, userId };
+  return { ok: true, userId, via: "dev" };
 };
