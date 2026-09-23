@@ -160,6 +160,13 @@ export const SummarizeTransactionsSchema = v.object({
   groupBy: v.picklist(["category", "type", "month"], "Unknown grouping."),
 });
 
+export const GetBudgetPaceSchema = v.object({
+  category: v.optional(
+    v.picklist(EXPENSE_CATEGORIES, "Budgets only exist on expense categories."),
+  ),
+  month: v.optional(MonthSchema),
+});
+
 export const TOOL_SCHEMAS = {
   add_transaction: AddTransactionSchema,
   edit_transaction: EditTransactionSchema,
@@ -167,6 +174,7 @@ export const TOOL_SCHEMAS = {
   set_budget: SetBudgetSchema,
   list_transactions: ListTransactionsSchema,
   summarize_transactions: SummarizeTransactionsSchema,
+  get_budget_pace: GetBudgetPaceSchema,
 } as const;
 
 export type ToolName = keyof typeof TOOL_SCHEMAS;
@@ -184,6 +192,7 @@ export type ListTransactionsArgs = v.InferOutput<typeof ListTransactionsSchema>;
 export type SummarizeTransactionsArgs = v.InferOutput<
   typeof SummarizeTransactionsSchema
 >;
+export type GetBudgetPaceArgs = v.InferOutput<typeof GetBudgetPaceSchema>;
 
 const amountProperty = {
   type: "number",
@@ -340,6 +349,25 @@ export const TOOL_DECLARATIONS: ChatCompletionTool[] = [
           groupBy: { type: "string", enum: ["category", "type", "month"] },
         },
         required: ["from", "to", "groupBy"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_budget_pace",
+      description:
+        "Budgets with spend so far and, for the current month, the daily spending pace, projected month-end total and the date the limit would be hit. Use for 'am I on track' questions. Read-only.",
+      parameters: {
+        type: "object",
+        properties: {
+          category: { type: "string", enum: [...EXPENSE_CATEGORIES] },
+          month: {
+            type: "string",
+            description: "YYYY-MM. Defaults to the current month.",
+          },
+        },
+        required: [],
       },
     },
   },

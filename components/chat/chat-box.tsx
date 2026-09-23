@@ -50,6 +50,7 @@ const TOOL_LABELS: Record<string, string> = {
   set_budget: "Saving the budget",
   list_transactions: "Looking through your records",
   summarize_transactions: "Adding up the totals",
+  get_budget_pace: "Checking your budget pace",
 };
 
 /**

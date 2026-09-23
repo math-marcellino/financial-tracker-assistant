@@ -13,6 +13,7 @@ import {
   type AddTransactionArgs,
   type DeleteTransactionArgs,
   type EditTransactionArgs,
+  type GetBudgetPaceArgs,
   type ListTransactionsArgs,
   type SetBudgetArgs,
   type SummarizeTransactionsArgs,
@@ -31,6 +32,7 @@ import {
   createTransactionFor,
   deleteTransactionFor,
   editTransactionFor,
+  listBudgetsWithSpend,
   listTransactionsFor,
   summarizeTransactionsFor,
 } from "@/lib/db/transactions";
@@ -135,9 +137,12 @@ const buildSystemInstruction = (defaultCurrency: string, now: Date): string =>
     // figure in a finance tool is worse than "I don't know" — it looks authoritative.
     "Never state an exchange rate, market price, or any financial figure you did not get from a tool. If you do not have it, say you do not have it.",
     "Do not give investment, tax, or legal advice. Say it is outside what you do.",
-    "Only describe features you actually have: logging, editing, deleting, budgets, and answering questions about recorded transactions.",
+    "Only describe features you actually have: logging, editing, deleting, budgets, budget pace estimates, and answering questions about recorded transactions.",
     "Do not suggest exporting, downloading, emailing, generating a report or a CSV, or contacting support. Those do not exist here. When asked for one, say plainly that it is not something this assistant can do, and stop there — do not propose a workaround.",
     "To answer questions about past spending, call list_transactions or summarize_transactions. Never guess at figures or rely on the conversation for them.",
+    // The pace is only meaningful under conditions the SQL enforces; a pace the model
+    // derives itself would skip them and look just as authoritative.
+    "For 'am I on track' or 'will I go over' questions about a budget, call get_budget_pace. Never compute a pace or a projection yourself. When pace is null, say why from paceStatus: not_current_month, excluded_category (paid in lumps, so a daily rate means nothing), no_spend, or too_little_data (fewer than 5 days or 3 entries this month).",
     "When the user refers to a transaction in words ('my last grocery entry'), call list_transactions first to get its id, then edit or delete it.",
     // The chatbox renders markdown now, but only inline emphasis is styled: headings and
     // lists would come out unstyled, since the typography plugin isn't installed.
@@ -220,6 +225,32 @@ const executeToolCall = async (
           category: row.categoryExpense ?? row.categoryIncome,
           date: row.date,
           note: row.note,
+        })),
+      },
+    };
+  }
+
+  if (name === "get_budget_pace") {
+    const input = args as GetBudgetPaceArgs;
+    const month = input.month ?? toIsoDate(now).slice(0, 7);
+    const rows = await listBudgetsWithSpend(userId, {
+      month,
+      category: input.category,
+      today: toIsoDate(now),
+    });
+
+    return {
+      transaction: null,
+      result: {
+        month,
+        count: rows.length,
+        budgets: rows.map((row) => ({
+          category: row.category,
+          limit: row.limitAmount,
+          spent: row.spent,
+          currency: row.currency,
+          paceStatus: row.paceStatus,
+          pace: row.pace,
         })),
       },
     };
