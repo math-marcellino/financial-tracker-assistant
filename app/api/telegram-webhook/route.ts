@@ -1,6 +1,7 @@
 import { Bot, webhookCallback } from "grammy";
 
 import { handleAgentMessage } from "@/lib/agent/handleAgentMessage";
+import { appBaseUrl, createLoginToken } from "@/lib/auth/login-token";
 import { ensureUser } from "@/lib/db/users";
 import { verifyWebhookSecret } from "@/lib/telegram/verify";
 
@@ -29,6 +30,33 @@ const getHandler = () => {
   }
 
   const bot = new Bot(token);
+
+  /**
+   * Sign-in without the Login Widget.
+   *
+   * Telegram has already proven who sent this message, so a one-time link into this
+   * chat is as trustworthy as the widget's hash — and it has no phone-number step,
+   * no popup and no third-party cookie to be blocked.
+   */
+  bot.command("login", async (ctx) => {
+    const from = ctx.from;
+
+    if (!from) {
+      return;
+    }
+
+    await ensureUser(from.id, {
+      username: from.username ?? null,
+      firstName: from.first_name ?? null,
+    });
+
+    const token = await createLoginToken(from.id);
+
+    await ctx.reply(
+      `Tap to sign in:\n${appBaseUrl()}/login?token=${token}\n\nThe link works once and expires in 10 minutes.`,
+      { link_preview_options: { is_disabled: true } },
+    );
+  });
 
   bot.on("message:text", async (ctx) => {
     const from = ctx.from;

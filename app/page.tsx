@@ -15,10 +15,24 @@ import { ensureUser } from "@/lib/db/users";
 import { resolveUserId } from "@/lib/identity";
 
 // Server Component. The "use client" boundary sits on ChatBox, not on this page.
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const identity = await resolveUserId();
 
   if (!identity.ok) {
+    // /login redirects here with a reason. Landing on a bare sign-in page after
+    // clicking a dead link looks like the click did nothing.
+    const { login } = await searchParams;
+    const loginError =
+      login === "invalid"
+        ? "That sign-in link has expired or was already used. Send /login again for a fresh one."
+        : login === "missing"
+          ? "That sign-in link was incomplete. Send /login again for a fresh one."
+          : null;
+
     const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME;
 
     return (
@@ -36,8 +50,31 @@ export default async function DashboardPage() {
             </p>
           </div>
 
+          {loginError ? (
+            <p className="rounded-[var(--radius-sm)] border border-white/20 bg-white/10 px-4 py-2.5 text-sm text-white/90">
+              {loginError}
+            </p>
+          ) : null}
+
           {botUsername ? (
-            <TelegramLogin botUsername={botUsername} />
+            <div className="flex flex-col items-center gap-4">
+              <TelegramLogin botUsername={botUsername} />
+
+              {/* The widget's phone-number step fails silently in some browsers, so the
+                  bot route is offered as a peer rather than buried as a fallback. */}
+              <p className="text-sm text-white/60">
+                Or send{" "}
+                <a
+                  href={`https://t.me/${botUsername}?start=login`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-mono text-white/80 underline underline-offset-4"
+                >
+                  /login
+                </a>{" "}
+                to the bot and tap the link it sends back.
+              </p>
+            </div>
           ) : (
             <p className="text-sm text-white/70">
               NEXT_PUBLIC_TELEGRAM_BOT_USERNAME is not set, so the login widget

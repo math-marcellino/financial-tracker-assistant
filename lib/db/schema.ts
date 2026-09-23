@@ -191,6 +191,26 @@ export const messages = pgTable(
   ],
 );
 
+/**
+ * One-time login links issued by the bot's /login command.
+ *
+ * The token is signed, so it could be verified without any storage — this table exists
+ * purely to make it single-use. The link lands in a Telegram chat and stays there, so
+ * expiry alone would leave it replayable for its whole window by anyone who can read
+ * that chat.
+ */
+export const loginTokens = pgTable("login_tokens", {
+  /** The jti from the signed token. */
+  id: uuid("id").primaryKey(),
+  userId: bigint("user_id", { mode: "number" })
+    .notNull()
+    .references(() => users.telegramId, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Transaction = typeof transactions.$inferSelect;
