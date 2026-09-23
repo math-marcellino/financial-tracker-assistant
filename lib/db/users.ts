@@ -4,6 +4,20 @@ import { getDb } from "@/lib/db";
 import { users, type User } from "@/lib/db/schema";
 
 /**
+ * Read-only existence check. Used by the Telegram webhook to decide whether a sender is
+ * registered *before* anything else runs — no row is created, so an unknown sender
+ * leaves no trace and costs nothing beyond this one indexed lookup.
+ */
+export const findUser = async (telegramId: number): Promise<User | null> => {
+  const [row] = await getDb()
+    .select()
+    .from(users)
+    .where(eq(users.telegramId, telegramId));
+
+  return row ?? null;
+};
+
+/**
  * Transactions carry a foreign key to `users`, so a row has to exist before the agent can
  * write anything. Identity is a caller concern: route handlers decide *who* the user is,
  * this just guarantees the row.

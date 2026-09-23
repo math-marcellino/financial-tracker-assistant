@@ -1,9 +1,9 @@
-import { Bot, webhookCallback } from "grammy";
+import { Bot, webhookCallback, type Context } from "grammy";
 
 import { handleAgentMessage } from "@/lib/agent/handleAgentMessage";
 import { appBaseUrl, createLoginToken } from "@/lib/auth/login-token";
 import type { Transaction } from "@/lib/db/schema";
-import { ensureUser } from "@/lib/db/users";
+import { ensureUser, findUser } from "@/lib/db/users";
 import { formatAmount, humanizeCategory } from "@/lib/format";
 import { verifyWebhookSecret } from "@/lib/telegram/verify";
 
@@ -55,6 +55,43 @@ const transactionCard = (transaction: Transaction | null): string => {
   return `\n\n<blockquote><b>${isExpense ? "EXPENSE" : "INCOME"}</b>\n${escaped.join("\n")}</blockquote>`;
 };
 
+/**
+ * The bot serves registered users only: a Telegram id proves *who* somebody is, never
+ * that they are entitled to an account here. Signing up happens on the web, so an
+ * unknown sender is told where to go and nothing else runs.
+ *
+ * One indexed read, and no writes — an unknown sender must not create a row, reach
+ * Groq, or cost anything beyond this lookup.
+ */
+const requireRegistered = async (
+  ctx: Context,
+): Promise<{ id: number } | null> => {
+  const from = ctx.from;
+
+  if (!from) {
+    return null;
+  }
+
+  const user = await findUser(from.id);
+
+  if (!user) {
+    await ctx.reply(
+      `You'll need an account before I can help.\n\nSign in with Telegram at ${appBaseUrl()} and then come back — I'll pick up where you left off.`,
+      { link_preview_options: { is_disabled: true } },
+    );
+
+    return null;
+  }
+
+  // Refresh the display name only for people we already know; Telegram usernames change.
+  await ensureUser(from.id, {
+    username: from.username ?? null,
+    firstName: from.first_name ?? null,
+  });
+
+  return { id: from.id };
+};
+
 const toTelegramHtml = (text: string): string =>
   text
     // Escaping first, so a literal "<" in a note can't become markup.
@@ -91,18 +128,15 @@ const getHandler = () => {
    * no popup and no third-party cookie to be blocked.
    */
   bot.command("login", async (ctx) => {
-    const from = ctx.from;
+    // Gated like everything else: an open /login would be an unauthenticated signup
+    // route, which is exactly what registration-only is meant to prevent.
+    const sender = await requireRegistered(ctx);
 
-    if (!from) {
+    if (!sender) {
       return;
     }
 
-    await ensureUser(from.id, {
-      username: from.username ?? null,
-      firstName: from.first_name ?? null,
-    });
-
-    const token = await createLoginToken(from.id);
+    const token = await createLoginToken(sender.id);
 
     await ctx.reply(
       `Tap to sign in:\n${appBaseUrl()}/login?token=${token}\n\nThe link works once and expires in 10 minutes.`,
@@ -111,19 +145,14 @@ const getHandler = () => {
   });
 
   bot.on("message:text", async (ctx) => {
-    const from = ctx.from;
+    const sender = await requireRegistered(ctx);
 
-    if (!from) {
+    if (!sender) {
       return;
     }
 
-    await ensureUser(from.id, {
-      username: from.username ?? null,
-      firstName: from.first_name ?? null,
-    });
-
     const result = await handleAgentMessage({
-      userId: from.id,
+      userId: sender.id,
       message: ctx.message.text,
       source: "telegram",
     });
