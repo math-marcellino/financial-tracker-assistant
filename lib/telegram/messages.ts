@@ -36,3 +36,22 @@ export const helpMessage = (registered: boolean, greeting: boolean): string =>
     ...capabilityList(),
     "Send /help any time to see this again.",
   ].join("\n\n");
+
+/**
+ * Sent to the chat after a web sign-in. A first-timer gets the full tour, since that's
+ * the moment they're deciding whether this is worth using. Anyone else gets one line:
+ * it confirms the login, and doubles as a notice if the login wasn't theirs.
+ */
+export const loginNotice = (isNew: boolean): string =>
+  isNew
+    ? [
+        "<b>You're signed in 👋</b>",
+        `Welcome! This chat and the dashboard at ${escapeHtml(appBaseUrl())} share one account, so anything you log here shows up there, and the other way round.`,
+        "<b>What I can do</b>",
+        ...capabilityList(),
+        `Try it now: send <i>“${escapeHtml(CAPABILITIES.add_transaction.example)}”</i>. Send /help any time to see this list again.`,
+      ].join("\n\n")
+    : [
+        "Signed in to the web dashboard.",
+        "Not you? Send /login, open the dashboard, and choose <b>Sign out everywhere</b> from the account menu.",
+      ].join("\n\n");

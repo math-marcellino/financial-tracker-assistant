@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 
 import { consumeLoginToken } from "@/lib/auth/login-token";
 import { createSessionCookie } from "@/lib/session";
+import { sendLoginNotice } from "@/lib/telegram/notify";
 
 /**
  * Redeems a one-time link from the bot's /login command.
@@ -27,6 +29,9 @@ export const GET = async (request: Request): Promise<Response> => {
   }
 
   await createSessionCookie(userId);
+
+  // After the response, so the redirect never waits on Telegram.
+  after(() => sendLoginNotice(userId));
 
   redirect("/");
 };

@@ -1,7 +1,9 @@
+import { after } from "next/server";
 import * as v from "valibot";
 
 import { ensureUser } from "@/lib/db/users";
 import { createSessionCookie } from "@/lib/session";
+import { sendLoginNotice } from "@/lib/telegram/notify";
 import { verifyLoginWidget } from "@/lib/telegram/verify";
 
 /**
@@ -60,6 +62,9 @@ export const POST = async (request: Request): Promise<Response> => {
   });
 
   await createSessionCookie(userId);
+
+  // After the response, so sign-in never waits on Telegram.
+  after(() => sendLoginNotice(userId));
 
   return Response.json({ ok: true });
 };

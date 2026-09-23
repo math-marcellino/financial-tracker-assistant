@@ -260,6 +260,17 @@ export const listRecentForUser = async (
     .limit(limit);
 };
 
+/** Whether the user has logged anything at all. One indexed probe, not a count. */
+export const hasAnyTransactions = async (userId: number): Promise<boolean> => {
+  const [row] = await getDb()
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(eq(transactions.userId, userId))
+    .limit(1);
+
+  return row !== undefined;
+};
+
 /** Months that actually have rows, newest first — the selector never offers an empty one. */
 export const listTransactionMonths = async (
   userId: number,
