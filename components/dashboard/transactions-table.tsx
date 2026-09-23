@@ -58,6 +58,31 @@ const compare = (
   return a.date.localeCompare(b.date);
 };
 
+/** Arrives as a Date from the server prefetch and as an ISO string from a refetch. */
+const createdAtMs = (row: DashboardTransaction): number =>
+  new Date(row.createdAt).getTime();
+
+/**
+ * The direction applies to the chosen column only. Ties always fall back to newest
+ * first — date, then time logged — so several entries on one day keep the order they
+ * were added in. Reversing the whole list flipped the ties too, which is what put
+ * today's entries out of order.
+ */
+const sortRows = (
+  rows: DashboardTransaction[],
+  key: SortKey,
+  direction: SortDirection,
+): DashboardTransaction[] => {
+  const sign = direction === "asc" ? 1 : -1;
+
+  return [...rows].sort(
+    (a, b) =>
+      sign * compare(a, b, key) ||
+      b.date.localeCompare(a.date) ||
+      createdAtMs(b) - createdAtMs(a),
+  );
+};
+
 export const TransactionsTable = ({
   userId,
   transactions,
@@ -84,11 +109,10 @@ export const TransactionsTable = ({
     [transactions, filters],
   );
 
-  const sorted = useMemo(() => {
-    const rows = [...filtered].sort((a, b) => compare(a, b, sortKey));
-
-    return direction === "asc" ? rows : rows.reverse();
-  }, [filtered, sortKey, direction]);
+  const sorted = useMemo(
+    () => sortRows(filtered, sortKey, direction),
+    [filtered, sortKey, direction],
+  );
 
   const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   // Clamped at read time, not stored: a delete, a poll or a month switch can shrink the
