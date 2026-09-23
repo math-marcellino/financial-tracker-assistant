@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowUp, Copy } from "lucide-react";
 import { useRef, useState } from "react";
 
+import { ModelPicker } from "@/components/chat/model-picker";
 import { Button } from "@/components/ui/button";
 import {
   ChatContainerContent,
@@ -226,6 +227,17 @@ export const ChatBox = ({ userId }: { userId: number }) => {
 
   return (
     <section className="flex min-h-0 w-full flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-2.5 border-b border-[var(--co-hairline)] pb-3">
+        <span
+          aria-hidden="true"
+          className="size-1.5 rounded-full bg-[var(--co-deep-green)]"
+        />
+        <h2 className="text-base text-[var(--co-ink)]">Assistant</h2>
+        <span className="font-mono text-[0.6875rem] tracking-[0.28px] text-[var(--co-muted)] uppercase">
+          Web &amp; Telegram
+        </span>
+      </div>
+
       {/* Full-bleed scroller: the scrollbar belongs at the window edge, not at the
           edge of the reading column. Only one element in this tree scrolls. */}
       <ChatContainerRoot className="relative min-h-0 flex-1 space-y-0">
@@ -345,6 +357,10 @@ export const ChatBox = ({ userId }: { userId: number }) => {
             </PromptInputActions>
           </div>
         </PromptInput>
+
+        <div className="flex items-center justify-between gap-3 px-1 pt-2">
+          <ModelPicker userId={userId} />
+        </div>
       </div>
     </section>
   );

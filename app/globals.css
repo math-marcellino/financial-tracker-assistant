@@ -303,3 +303,29 @@
   opacity: 0.85;
   pointer-events: none;
 }
+
+/* ---- Scrollbars -------------------------------------------------------- */
+/* Thumb only: no track plate. The hairline colour keeps it part of the system
+   rather than an OS artefact sitting on a grey rail. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--co-hairline) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--co-hairline);
+  border-radius: var(--radius-pill);
+  /* Transparent border + background-clip keeps the thumb slim without a track. */
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--co-muted-soft, var(--co-muted));
+}

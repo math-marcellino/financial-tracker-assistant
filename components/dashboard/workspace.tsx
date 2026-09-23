@@ -1,60 +1,40 @@
 "use client";
 
-import { useState } from "react";
+import { MessageSquare, X } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { ChatBox } from "@/components/chat/chat-box";
 import { DashboardPanel } from "@/components/dashboard/dashboard-panel";
 
 /**
- * Two panes side by side on desktop. Below `lg` there isn't room for both, and
- * stacking them starves the chat — so they become tabs and each gets the full height.
+ * Two panes side by side on desktop, with the chat as a rail anchored to the right edge
+ * of the screen.
+ *
+ * Below `lg` there isn't room for both. The dashboard is the default view — it's the
+ * thing you scan — and the chat opens over it as a drawer from a floating button.
  */
-type Pane = "dashboard" | "chat";
-
-const TABS: Array<{ id: Pane; label: string }> = [
-  { id: "dashboard", label: "Dashboard" },
-  { id: "chat", label: "Chat" },
-];
-
 export const Workspace = ({ userId }: { userId: number }) => {
-  const [pane, setPane] = useState<Pane>("chat");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Escape closes the drawer; a full-screen overlay with no keyboard exit is a trap.
+  useEffect(() => {
+    if (!drawerOpen) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDrawerOpen(false);
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [drawerOpen]);
 
   return (
-    // On large screens the chat is a rail anchored to the right edge of the *screen*;
-    // the dashboard takes the rest and centres its own content. Below lg there is no
-    // room for both, so they become tabs and each gets the full height.
-    <div className="flex min-h-0 w-full flex-1 flex-col lg:flex-row">
-      <div className="w-full px-6 pt-6 lg:hidden">
-        <div
-          role="tablist"
-          aria-label="Workspace"
-          className="mb-4 flex shrink-0 gap-2"
-        >
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={pane === tab.id}
-              onClick={() => setPane(tab.id)}
-              className={
-                pane === tab.id
-                  ? "co-pill px-4 py-1.5 text-[0.875rem]"
-                  : "co-pill-outline px-4 py-1.5 text-[0.875rem]"
-              }
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <main
-        className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto lg:block ${
-          pane === "dashboard" ? "block" : "hidden"
-        }`}
-      >
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 pt-8 pb-10">
+    <div className="relative flex min-h-0 w-full flex-1 flex-col lg:flex-row">
+      <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 pt-8 pb-24 lg:pb-10">
           {/* The header lives inside the dashboard column so it tracks that column's
               centre, rather than being nudged into place with margins from outside. */}
           <header className="flex flex-col gap-2">
@@ -70,15 +50,52 @@ export const Workspace = ({ userId }: { userId: number }) => {
         </div>
       </main>
 
+      {/* Scrim: mobile only, and only while the drawer is open. */}
+      {drawerOpen ? (
+        <button
+          type="button"
+          aria-label="Close assistant"
+          onClick={() => setDrawerOpen(false)}
+          className="fixed inset-0 z-30 bg-[var(--co-ink)]/25 lg:hidden"
+        />
+      ) : null}
+
       <aside
-        // lg:flex-none matters: the mobile branch adds flex-1 so the pane fills the
-        // screen, and without this it would also override the rail's fixed width.
-        className={`min-h-0 flex-col border-[var(--co-hairline)] px-6 pb-6 lg:flex lg:w-[26rem] lg:flex-none lg:border-l lg:px-8 lg:pt-8 xl:w-[30rem] ${
-          pane === "chat" ? "flex flex-1" : "hidden"
+        // Below lg this is a bottom drawer; at lg and up it is the static right rail.
+        // lg:flex-none keeps the drawer's mobile sizing from fighting the rail width.
+        className={`flex min-h-0 flex-col border-[var(--co-hairline)] bg-[var(--co-canvas)] max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-40 max-lg:h-[85dvh] max-lg:rounded-t-[var(--radius-lg)] max-lg:border-t max-lg:px-5 max-lg:pb-4 max-lg:shadow-[0_-8px_32px_-12px_rgba(0,0,0,0.18)] max-lg:transition-transform max-lg:duration-200 lg:w-[26rem] lg:flex-none lg:border-l lg:px-8 lg:pt-8 lg:pb-6 xl:w-[30rem] ${
+          drawerOpen ? "max-lg:translate-y-0" : "max-lg:translate-y-full"
         }`}
       >
+        <div className="relative flex shrink-0 items-center justify-center pt-3 pb-1 lg:hidden">
+          {/* A grab handle reads as "this panel slides", which a bare close button doesn't. */}
+          <span
+            aria-hidden="true"
+            className="h-1 w-10 rounded-full bg-[var(--co-hairline)]"
+          />
+          <button
+            type="button"
+            aria-label="Close assistant"
+            onClick={() => setDrawerOpen(false)}
+            className="absolute right-0 rounded-full p-1.5 text-[var(--co-muted)] transition-colors hover:text-[var(--co-ink)]"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
         <ChatBox userId={userId} />
       </aside>
+
+      {!drawerOpen ? (
+        <button
+          type="button"
+          onClick={() => setDrawerOpen(true)}
+          className="co-pill fixed right-5 bottom-5 z-20 flex items-center gap-2 px-5 py-3 text-[0.9375rem] shadow-[0_8px_24px_-8px_rgba(0,0,0,0.35)] lg:hidden"
+        >
+          <MessageSquare size={17} />
+          Assistant
+        </button>
+      ) : null}
     </div>
   );
 };

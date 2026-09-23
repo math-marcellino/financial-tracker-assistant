@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import * as v from "valibot";
 
 import { LLM_MODEL, getGroq } from "@/lib/agent/llm";
+import { resolveModel } from "@/lib/agent/models";
 import {
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
@@ -338,6 +339,10 @@ export async function* streamAgentMessage({
     return;
   }
 
+  // The stored preference is still untrusted at this point: it may name a model Groq
+  // has since retired, so it is checked against the live list before use.
+  const model = await resolveModel(user.preferredModel, LLM_MODEL);
+
   const history = await listMessages(userId);
 
   const working: ChatCompletionMessageParam[] = [
@@ -359,7 +364,7 @@ export async function* streamAgentMessage({
 
     try {
       const stream = await getGroq().chat.completions.create({
-        model: LLM_MODEL,
+        model,
         messages: working,
         tools: TOOL_DECLARATIONS,
         stream: true,

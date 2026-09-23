@@ -59,6 +59,9 @@ export const users = pgTable("users", {
   defaultCurrency: char("default_currency", { length: 3 })
     .notNull()
     .default("IDR"),
+  // Null means "use the app default". Validated against Groq's live model list on
+  // every request, so a stale or tampered value can never reach the API.
+  preferredModel: text("preferred_model"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
