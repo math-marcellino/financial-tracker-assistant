@@ -1,4 +1,4 @@
-import { getGroq } from "@/lib/agent/llm";
+import { withGroq } from "@/lib/agent/llm";
 
 /**
  * Which models the switcher may offer, resolved from Groq's live list rather than
@@ -43,7 +43,7 @@ const contextWindowOf = (model: unknown): number => {
 };
 
 export const listAvailableModels = async (): Promise<AvailableModel[]> => {
-  const response = await getGroq().models.list();
+  const response = await withGroq((groq) => groq.models.list());
 
   return (response.data ?? [])
     .filter((model) => {

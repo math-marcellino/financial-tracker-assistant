@@ -2,7 +2,7 @@ import type { ChatCompletionMessageParam } from "groq-sdk/resources/chat/complet
 import { eq } from "drizzle-orm";
 import * as v from "valibot";
 
-import { LLM_MODEL, getGroq } from "@/lib/agent/llm";
+import { LLM_MODEL, withGroq } from "@/lib/agent/llm";
 import { resolveModel, resolveVisionModel } from "@/lib/agent/models";
 import {
   EXPENSE_CATEGORIES,
@@ -385,12 +385,14 @@ export async function* streamAgentMessage({
     const partials: Array<{ id?: string; name?: string; args: string }> = [];
 
     try {
-      const stream = await getGroq().chat.completions.create({
-        model,
-        messages: working,
-        tools: TOOL_DECLARATIONS,
-        stream: true,
-      });
+      const stream = await withGroq((groq) =>
+        groq.chat.completions.create({
+          model,
+          messages: working,
+          tools: TOOL_DECLARATIONS,
+          stream: true,
+        }),
+      );
 
       for await (const chunk of stream) {
         const delta = chunk.choices[0]?.delta;
